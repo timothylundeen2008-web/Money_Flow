@@ -34,24 +34,24 @@ st.set_page_config(
 st.markdown("""
 <style>
   /* Global */
-  [data-testid="stAppViewContainer"] { background: #fafaf9; }
+  [data-testid="stAppViewContainer"] { background: #0e1117; }
   [data-testid="stHeader"] { background: transparent; }
   .block-container { padding: 1.5rem 2rem 3rem; max-width: 1400px; }
 
   /* Metric cards */
   .metric-card {
-    background: #f1efe8;
+    background: #1a1d24;
     border-radius: 8px;
     padding: 0.75rem 1rem;
     margin-bottom: 0;
   }
-  .metric-label { font-size: 12px; color: #5f5e5a; margin-bottom: 4px; font-weight: 500; }
+  .metric-label { font-size: 12px; color: #a0a0a0; margin-bottom: 4px; font-weight: 500; }
   .metric-value { font-size: 22px; font-weight: 500; }
-  .metric-sub   { font-size: 11px; color: #888780; margin-top: 2px; }
+  .metric-sub   { font-size: 11px; color: #6b7280; margin-top: 2px; }
 
   /* Section labels */
   .section-label {
-    font-size: 11px; font-weight: 500; color: #888780;
+    font-size: 11px; font-weight: 500; color: #6b7280;
     text-transform: uppercase; letter-spacing: .06em;
     margin-bottom: 8px; margin-top: 4px;
   }
@@ -59,19 +59,19 @@ st.markdown("""
   /* Signal rows */
   .signal-row {
     display: flex; align-items: flex-start; gap: 10px;
-    padding: 8px 0; border-bottom: 0.5px solid rgba(0,0,0,0.08);
+    padding: 8px 0; border-bottom: 0.5px solid rgba(255,255,255,0.08);
   }
   .signal-row:last-child { border-bottom: none; }
   .sig-badge {
     font-size: 10px; font-weight: 500; padding: 2px 8px;
     border-radius: 6px; white-space: nowrap; flex-shrink: 0; margin-top: 2px;
   }
-  .sig-sector { font-size: 13px; font-weight: 500; color: #2c2c2a; }
-  .sig-detail { font-size: 11px; color: #5f5e5a; margin-top: 1px; }
+  .sig-sector { font-size: 13px; font-weight: 500; color: #f0f0f0; }
+  .sig-detail { font-size: 11px; color: #9ca3af; margin-top: 1px; }
 
   /* Cards */
   .dash-card {
-    background: #fff; border: 0.5px solid rgba(0,0,0,0.1);
+    background: #1a1d24; border: 0.5px solid rgba(255,255,255,0.1);
     border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1rem;
   }
 
@@ -111,11 +111,11 @@ def fmt_pct(v: float) -> str:
 def load_data():
     return fetch_sector_data()
 
-with st.spinner("Fetching latest sector data from Finviz…"):
+with st.spinner("Fetching latest ETF price data from Yahoo Finance…"):
     df = load_data()
 
 if df is None or df.empty:
-    st.error("⚠️ Could not fetch data from Finviz. Check your connection and try again.")
+    st.error('⚠️ Could not fetch data. Check your connection and try again.')
     st.stop()
 
 # ── Compute derived metrics ────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ with col_title:
     st.markdown("## 📊 Institutional Rotation Dashboard")
     cache_age = get_cache_age_minutes()
     last_update = datetime.now() - timedelta(minutes=cache_age)
-    st.caption(f"Data via Finviz · Last updated {last_update.strftime('%b %d, %Y %H:%M')} · Refreshes every 60 min")
+    st.caption(f"Data via yfinance · Last updated {last_update.strftime('%b %d, %Y %H:%M')} · Refreshes every 60 min")
 with col_refresh:
     if st.button("🔄 Refresh", use_container_width=True):
         st.cache_data.clear()
@@ -220,7 +220,7 @@ with col_rrg:
             name=row["ticker"],
             text=[row["ticker"]],
             textposition="top right",
-            textfont=dict(size=10, color="#2c2c2a"),
+            textfont=dict(size=10, color="#e5e7eb"),
             marker=dict(size=14, color=color, line=dict(color="#fff", width=1.5)),
             hovertemplate=(
                 f"<b>{row['sector']}</b><br>"
@@ -234,16 +234,16 @@ with col_rrg:
     fig_rrg.update_layout(
         height=420,
         margin=dict(l=40, r=20, t=10, b=40),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(range=[92, 108], title="RS-Ratio (relative strength)", gridcolor="rgba(136,135,128,0.15)", zeroline=False, tickfont=dict(size=10)),
-        yaxis=dict(range=[92, 108], title="RS-Momentum (acceleration)",   gridcolor="rgba(136,135,128,0.15)", zeroline=False, tickfont=dict(size=10)),
+        paper_bgcolor="rgba(14,17,23,0)",
+        plot_bgcolor="rgba(14,17,23,0)",
+        xaxis=dict(range=[92, 108], title="RS-Ratio (relative strength)", gridcolor="rgba(255,255,255,0.08)", zeroline=False, tickfont=dict(size=10)),
+        yaxis=dict(range=[92, 108], title="RS-Momentum (acceleration)",   gridcolor="rgba(255,255,255,0.08)", zeroline=False, tickfont=dict(size=10)),
     )
     st.plotly_chart(fig_rrg, use_container_width=True, config={"displayModeBar": False})
 
     # RRG legend
     st.markdown("""
-    <div style="display:flex;gap:16px;font-size:12px;color:#5f5e5a;margin-top:-12px;">
+    <div style="display:flex;gap:16px;font-size:12px;color:#9ca3af;margin-top:-12px;">
       <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#1D9E75;margin-right:4px"></span>Leading</span>
       <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#BA7517;margin-right:4px"></span>Weakening</span>
       <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#E24B4A;margin-right:4px"></span>Lagging</span>
@@ -263,7 +263,7 @@ with col_signals:
         <div class="signal-row">
           <span class="sig-badge" style="background:{bc['bg']};color:{bc['fg']}">{q}</span>
           <div>
-            <div class="sig-sector">{row['sector']} <span style="font-size:11px;font-weight:400;color:#888780">{row['ticker']}</span></div>
+            <div class="sig-sector">{row['sector']} <span style="font-size:11px;font-weight:400;color:#6b7280">{row['ticker']}</span></div>
             <div class="sig-detail" style="color:{spread_c}">{spread_dir} · spread {fmt_pct(row['spread'])}</div>
             <div class="sig-detail">RS-Ratio {row['rs_ratio']:.1f} · RS-Mom {row['rs_momentum']:.1f}</div>
           </div>
@@ -294,8 +294,8 @@ else:
 # Build Plotly heatmap table
 header_vals = ["Sector"] + list(timeframe_cols.keys())
 cell_vals   = [hm_df["sector"].tolist()]
-fill_colors = [["#f1efe8"] * len(hm_df)]
-font_colors = [["#2c2c2a"] * len(hm_df)]
+fill_colors = [["#1e2330"] * len(hm_df)]
+font_colors = [["#f0f0f0"] * len(hm_df)]
 
 for tf, col in timeframe_cols.items():
     col_vals, fills, fonts = [], [], []
@@ -312,11 +312,11 @@ fig_hm = go.Figure(go.Table(
     columnwidth=[180] + [80] * len(timeframe_cols),
     header=dict(
         values=[f"<b>{h}</b>" for h in header_vals],
-        fill_color="#f1efe8",
-        font=dict(color="#2c2c2a", size=12),
+        fill_color="#1e2330",
+        font=dict(color="#f0f0f0", size=12),
         align=["left"] + ["center"] * len(timeframe_cols),
         height=32,
-        line_color="rgba(0,0,0,0.08)",
+        line_color="rgba(255,255,255,0.08)",
     ),
     cells=dict(
         values=cell_vals,
@@ -324,19 +324,19 @@ fig_hm = go.Figure(go.Table(
         font=dict(color=font_colors, size=12),
         align=["left"] + ["center"] * len(timeframe_cols),
         height=30,
-        line_color="rgba(0,0,0,0.05)",
+        line_color="rgba(255,255,255,0.05)",
     ),
 ))
 fig_hm.update_layout(
     height=len(hm_df) * 32 + 80,
     margin=dict(l=0, r=0, t=0, b=0),
-    paper_bgcolor="rgba(0,0,0,0)",
+    paper_bgcolor="rgba(14,17,23,0)",
 )
 st.plotly_chart(fig_hm, use_container_width=True, config={"displayModeBar": False})
 
 # Color legend
 st.markdown("""
-<div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:#5f5e5a;margin-top:-8px;margin-bottom:16px">
+<div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:#9ca3af;margin-top:-8px;margin-bottom:16px">
   <span style="font-weight:500">Scale:</span>
   <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#085041;margin-right:3px"></span>&gt;+8%</span>
   <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#1D9E75;margin-right:3px"></span>+4–8%</span>
@@ -356,7 +356,7 @@ max_spread  = spread_df["spread"].abs().max() or 1
 fig_spread = go.Figure()
 for _, row in spread_df.iterrows():
     v = row["spread"]
-    color = "#1D9E75" if v > 2 else "#D85A30" if v < -2 else "#888780"
+    color = "#1D9E75" if v > 2 else "#D85A30" if v < -2 else "#6b7280"
     label = "Accumulation" if v > 2 else "Distribution" if v < -2 else "Neutral"
     fig_spread.add_trace(go.Bar(
         x=[v],
@@ -372,11 +372,11 @@ fig_spread.add_vline(x=0, line_width=1.5, line_color="rgba(136,135,128,0.5)")
 fig_spread.update_layout(
     height=380,
     margin=dict(l=10, r=10, t=10, b=40),
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
+    paper_bgcolor="rgba(14,17,23,0)",
+    plot_bgcolor="rgba(14,17,23,0)",
     xaxis=dict(
         title="Spread: 1M performance − (6M ÷ 6)",
-        gridcolor="rgba(136,135,128,0.15)",
+        gridcolor="rgba(255,255,255,0.08)",
         zeroline=False,
         ticksuffix="%",
         tickfont=dict(size=10),
@@ -414,4 +414,4 @@ with st.expander("📋 Raw data table"):
     )
 
 st.markdown("---")
-st.caption("Data sourced from [Finviz](https://finviz.com/groups.ashx) (free tier) via HTML scraping. Not financial advice.")
+st.caption("Data sourced from yfinance (Yahoo Finance) via ETF price history. Not financial advice.")
