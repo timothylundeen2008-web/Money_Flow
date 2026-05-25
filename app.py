@@ -435,11 +435,9 @@ if movers_df is not None and not movers_df.empty:
         sig_filter = st.selectbox("Filter by signal", sigs, key="mover_sig", label_visibility="collapsed")
     with col_f3:
         top_n = st.selectbox("Show top", [10, 15, 20], key="mover_n", label_visibility="collapsed")
+
     with col_f4:
-        vol_spike_only = st.toggle("🔊 Vol ≥1.5×", value=False, key="vol_spike",
-                                   help="Show only ETFs with volume ≥1.5× their 20-day average — institutional conviction threshold")
-    with col_f4:
-        vol_spike_only = st.toggle("🔊 Vol ≥1.5×", value=False, key="vol_spike",
+        vol_spike_only = st.toggle("🔊 Vol ≥1.5×", value=False, key="vol_spike_filter",
                                    help="Show only ETFs with volume ≥1.5× their 20-day average — the institutional conviction threshold")
 
     # Re-fetch with updated top_n if changed
