@@ -181,7 +181,7 @@ with col_rrg:
 
     tf_options = {"1W": "rs_ratio_1w", "1M": "rs_ratio_1m", "3M": "rs_ratio_3m"}
     mom_options = {"1W": "rs_momentum_1w", "1M": "rs_momentum_1m", "3M": "rs_momentum_3m"}
-    tf_sel = st.radio("Timeframe", list(tf_options.keys()), horizontal=True, key="rrg_tf", label_visibility="collapsed")
+    tf_sel = st.radio("Timeframe", list(tf_options.keys()), horizontal=True, key="rrg_tf", label_visibility="collapsed", index=2)
 
     ratio_col = tf_options[tf_sel]
     mom_col   = mom_options[tf_sel]
