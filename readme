@@ -1,0 +1,123 @@
+# 📊 Institutional Rotation Dashboard
+
+A daily-updating Streamlit app that tracks institutional money flow across S&P 500 sectors using free Finviz data and Relative Rotation Graph (RRG) mathematics.
+
+## What it shows
+
+| Panel | What it detects |
+|---|---|
+| **Relative Rotation Graph** | Where each sector sits in the rotation cycle (Leading / Weakening / Lagging / Improving) |
+| **Performance Heatmap** | All 11 sectors × 7 timeframes (1D, 1W, 1M, 3M, 6M, 1Y, YTD) |
+| **Institutional Signals** | Ranked list of sectors by accumulation/distribution signal strength |
+| **Spread Bars** | 1M performance vs 6M run-rate — the clearest proxy for institutional accumulation |
+
+## How the math works
+
+### RS-Ratio (where money IS)
+```
+RS-Ratio = (1 + sector_perf) / (1 + benchmark_perf) × 100
+```
+- Above 100 → sector is outperforming the equal-weighted average
+- Below 100 → underperforming
+
+### RS-Momentum (where money is GOING)
+```
+RS-Momentum = RS_short_term / RS_medium_term × 100
+```
+- Above 100 → relative strength is accelerating
+- Below 100 → decelerating
+
+### Four Quadrants
+```
+RS-Ratio ≥ 100 + RS-Mom ≥ 100  → LEADING    (institutions IN, riding momentum)
+RS-Ratio ≥ 100 + RS-Mom < 100  → WEAKENING  (institutions distributing)
+RS-Ratio < 100 + RS-Mom < 100  → LAGGING    (avoid)
+RS-Ratio < 100 + RS-Mom ≥ 100  → IMPROVING  (early accumulation signal ⭐)
+```
+
+### Accumulation/Distribution Spread
+```
+Spread = 1M_performance − (6M_performance ÷ 6)
+```
+Large positive spread = this month is running HOT above the 6-month run rate = institutional buying.
+Large negative spread = institutional distribution.
+
+## Data source
+
+**Finviz free tier** — `https://finviz.com/groups.ashx?g=sector&v=120`
+
+No API key required. The app scrapes the sector groups performance table directly.
+Data refreshes every 60 minutes (respects Finviz rate limits).
+
+Finviz columns used:
+- `Change` → 1D performance
+- `Perf Week` → 1W
+- `Perf Month` → 1M
+- `Perf Quart` → 3M
+- `Perf Half` → 6M
+- `Perf Year` → 1Y
+- `Perf YTD` → YTD
+
+## Setup
+
+### 1. Clone / download
+
+```bash
+git clone https://github.com/YOUR_USERNAME/rotation-dashboard.git
+cd rotation-dashboard
+```
+
+### 2. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Run locally
+
+```bash
+streamlit run app.py
+```
+
+Opens at `http://localhost:8501`
+
+## Deploy to Streamlit Cloud (free)
+
+1. Push this repo to GitHub (public or private)
+2. Go to [share.streamlit.io](https://share.streamlit.io)
+3. Click **New app** → connect your GitHub repo
+4. Set **Main file path** to `app.py`
+5. Click **Deploy**
+
+The app will auto-deploy and get a public URL like:
+`https://your-app-name.streamlit.app`
+
+### Auto-refresh on Streamlit Cloud
+The app caches data for 60 minutes via `@st.cache_data(ttl=3600)`.
+Each visit that's more than 60 minutes after the last fetch triggers a fresh pull from Finviz.
+You can also force-refresh with the **🔄 Refresh** button.
+
+## Project structure
+
+```
+rotation-dashboard/
+├── app.py              # Main Streamlit UI
+├── data_fetcher.py     # Finviz scraper + fallback demo data
+├── rotation_math.py    # RS-Ratio, RS-Momentum, spread, quadrant math
+├── requirements.txt    # Python dependencies
+├── .streamlit/
+│   └── config.toml     # Theme + server config
+└── README.md
+```
+
+## Finviz fair use note
+
+This app makes 1 HTTP request per hour to Finviz's public groups page.
+This is well within normal browser usage. Do not modify the cache TTL to be shorter than 15 minutes.
+For higher-frequency data or more granular metrics, consider [Finviz Elite](https://elite.finviz.com).
+
+## Disclaimer
+
+This dashboard is for informational and educational purposes only.
+It does not constitute financial advice. Past sector rotation patterns
+do not guarantee future results.
