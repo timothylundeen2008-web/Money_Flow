@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timedelta
 
 from data_fetcher import fetch_sector_data, get_cache_age_minutes
+from top_movers import fetch_top_movers, SIGNAL_COLORS
 from rotation_math import (
     compute_rs_ratio,
     compute_rs_momentum,
@@ -412,6 +413,135 @@ with st.expander("📋 Raw data table"):
         file_name=f"rotation_{datetime.now().strftime('%Y%m%d')}.csv",
         mime="text/csv",
     )
+
+
+# ── Where's the Money — Top 10 ETF Flow Panel ──────────────────────────────────
+st.markdown("---")
+st.markdown("## 💸 Where's the Money")
+st.caption("Top 10 sub-sector ETFs ranked by Institutional Flow Score · Updated hourly")
+
+with st.spinner("Loading ETF flow data…"):
+    movers_df = fetch_top_movers(top_n=10)
+
+if movers_df is not None and not movers_df.empty:
+
+    # ── Filter controls ──────────────────────────────────────────────────────
+    col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
+    with col_f1:
+        cats = ["All"] + sorted(movers_df["category"].unique().tolist())
+        cat_filter = st.selectbox("Filter by category", cats, key="mover_cat", label_visibility="collapsed")
+    with col_f2:
+        sigs = ["All signals"] + list(SIGNAL_COLORS.keys())
+        sig_filter = st.selectbox("Filter by signal", sigs, key="mover_sig", label_visibility="collapsed")
+    with col_f3:
+        top_n = st.selectbox("Show top", [10, 15, 20], key="mover_n", label_visibility="collapsed")
+
+    # Re-fetch with updated top_n if changed
+    if top_n != 10:
+        movers_df = fetch_top_movers(top_n=top_n)
+
+    display_df = movers_df.copy()
+    if cat_filter != "All":
+        display_df = display_df[display_df["category"] == cat_filter]
+    if sig_filter != "All signals":
+        display_df = display_df[display_df["signal"] == sig_filter]
+
+    # ── Rank cards ───────────────────────────────────────────────────────────
+    for rank, (_, row) in enumerate(display_df.iterrows(), 1):
+        sig_fg = row["signal_fg"]
+        sig_bg = row["signal_bg"]
+
+        # Spark bar: visual of 1D/1W/1M/3M as mini bar chart
+        def spark_bar(v, max_abs=15):
+            pct = min(abs(v) / max_abs * 100, 100)
+            color = "#1D9E75" if v >= 0 else "#D85A30"
+            return f'<div style="display:inline-flex;align-items:center;gap:4px;width:80px"><div style="height:6px;width:{pct:.0f}%;max-width:60px;background:{color};border-radius:3px"></div><span style="font-size:10px;color:{"#1D9E75" if v>=0 else "#D85A30"};font-weight:500">{fmt_pct(v)}</span></div>'
+
+        vol_color = "#1D9E75" if row["vol_ratio"] > 1.2 else "#D85A30" if row["vol_ratio"] < 0.8 else "#888780"
+        spread_color = "#1D9E75" if row["spread"] > 0 else "#D85A30"
+
+        st.markdown(f"""
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;
+             background:var(--secondary-background-color);border-radius:10px;
+             border:0.5px solid rgba(255,255,255,0.08);margin-bottom:6px;">
+
+          <!-- Rank -->
+          <div style="font-size:18px;font-weight:700;color:#6b7280;width:24px;text-align:center;flex-shrink:0">
+            {rank}
+          </div>
+
+          <!-- Ticker + Name -->
+          <div style="flex:0 0 130px">
+            <div style="font-size:15px;font-weight:600;color:var(--text-color)">{row["ticker"]}</div>
+            <div style="font-size:11px;color:#6b7280;margin-top:1px">{row["name"]}</div>
+            <div style="font-size:10px;color:#4b5563;margin-top:1px">{row["category"]}</div>
+          </div>
+
+          <!-- Signal badge -->
+          <div style="flex:0 0 140px">
+            <span style="background:{sig_bg};color:{sig_fg};font-size:10px;font-weight:600;
+                  padding:3px 8px;border-radius:6px">{row["signal"]}</span>
+          </div>
+
+          <!-- Perf bars -->
+          <div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:4px">
+            <div style="text-align:center">
+              <div style="font-size:9px;color:#6b7280;margin-bottom:2px">1D</div>
+              {spark_bar(row["perf_1d"])}
+            </div>
+            <div style="text-align:center">
+              <div style="font-size:9px;color:#6b7280;margin-bottom:2px">1W</div>
+              {spark_bar(row["perf_1w"])}
+            </div>
+            <div style="text-align:center">
+              <div style="font-size:9px;color:#6b7280;margin-bottom:2px">1M</div>
+              {spark_bar(row["perf_1m"])}
+            </div>
+            <div style="text-align:center">
+              <div style="font-size:9px;color:#6b7280;margin-bottom:2px">3M</div>
+              {spark_bar(row["perf_3m"])}
+            </div>
+          </div>
+
+          <!-- Spread + Vol -->
+          <div style="flex:0 0 110px;text-align:right">
+            <div style="font-size:11px;color:#6b7280">Spread</div>
+            <div style="font-size:13px;font-weight:600;color:{spread_color}">{fmt_pct(row["spread"])}</div>
+            <div style="font-size:10px;color:#6b7280;margin-top:3px">Vol ×{row["vol_ratio"]:.1f}</div>
+            <div style="font-size:10px;color:{vol_color}">{"↑ Heavy" if row["vol_ratio"]>1.3 else "↓ Light" if row["vol_ratio"]<0.8 else "Normal"}</div>
+          </div>
+
+          <!-- Flow score -->
+          <div style="flex:0 0 60px;text-align:center">
+            <div style="font-size:9px;color:#6b7280;margin-bottom:2px">FLOW</div>
+            <div style="font-size:17px;font-weight:700;color:{sig_fg}">{row["flow_score"]:.0f}</div>
+          </div>
+
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── Flow score methodology note ──────────────────────────────────────────
+    with st.expander("📐 How the Flow Score is calculated"):
+        st.markdown("""
+        The **Institutional Flow Score** combines four signals weighted by reliability:
+
+        | Weight | Component | What it measures |
+        |---|---|---|
+        | **40%** | Momentum consistency | Equal-weighted avg of 1W + 1M + 3M performance |
+        | **30%** | Acceleration (spread) | 1M perf minus (3M ÷ 3) monthly run-rate — positive = accelerating above trend |
+        | **20%** | Volume conviction | Recent 5-day avg volume vs 20-day baseline — above 1× = institutional size |
+        | **10%** | Timeframe unity | Fraction of 1W / 1M / 3M timeframes that are all positive |
+
+        **Signal labels** are assigned based on spread + volume together:
+        - **Strong Accumulation** → spread > 1.5% *and* vol ratio > 1.3×
+        - **Accumulation** → spread > 0.5% *and* vol ratio > 1.1×
+        - **Inflow** → positive 1M *and* positive spread
+        - **Distribution / Strong Distribution** → negative spread with declining volume
+        """)
+
+else:
+    st.info("Top movers data unavailable. Check connection and refresh.", icon="📡")
+
 
 st.markdown("---")
 st.caption("Data sourced from yfinance (Yahoo Finance) via ETF price history. Not financial advice.")
