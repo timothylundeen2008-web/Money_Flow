@@ -206,25 +206,37 @@ def _flow_score(row: pd.Series) -> float:
         + 0.20 * vol_conf * 10      # scale vol_ratio (1–3) to ~10–30 range
         + 0.10 * consistency * 20   # scale 0–1 to 0–20 range
     )
+    # Bonus: crossing the 1.5× institutional conviction threshold
+    if row.get("vol_ratio", 1.0) >= 1.5:
+        score += 8.0
     return round(score, 2)
 
 
-def _signal_label(row: pd.Series) -> str:
-    spread   = row["perf_1m"] - (row["perf_3m"] / 3)
-    vol      = row.get("vol_ratio", 1.0)
-    perf_1m  = row["perf_1m"]
+VOL_SPIKE_THRESHOLD = 1.5   # institutional conviction level
 
-    if spread > 1.5 and vol > 1.3:
+def _signal_label(row: pd.Series) -> str:
+    spread  = row["perf_1m"] - (row["perf_3m"] / 3)
+    vol     = row.get("vol_ratio", 1.0)
+    perf_1m = row["perf_1m"]
+    spike   = vol >= VOL_SPIKE_THRESHOLD   # ← the key institutional threshold
+
+    # Volume spike + positive spread = highest confidence signal
+    if spike and spread > 1.5 and perf_1m > 0:
         return "Strong Accumulation"
-    if spread > 0.5 and vol > 1.1:
+    if spike and spread > 0 and perf_1m > 0:
+        return "Accumulation"
+    if spike and perf_1m < 0 and spread < -1.0:
+        return "Strong Distribution"
+    if spike and perf_1m < 0:
+        return "Distribution"
+    # Non-spike signals
+    if spread > 1.5 and vol > 1.1:
         return "Accumulation"
     if perf_1m > 0 and spread > 0:
         return "Inflow"
     if spread < -1.5 and vol < 0.9:
-        return "Strong Distribution"
-    if spread < -0.5:
         return "Distribution"
-    if perf_1m < 0:
+    if perf_1m < 0 and spread < -0.5:
         return "Outflow"
     return "Neutral"
 
@@ -275,6 +287,7 @@ def fetch_top_movers(top_n: int = 10) -> pd.DataFrame:
             "vol_ratio": _vol_ratio(v) if not v.empty else 1.0,
         }
         rec["spread"]     = round(rec["perf_1m"] - (rec["perf_3m"] / 3), 2)
+        rec["vol_spike"]  = rec["vol_ratio"] >= 1.5          # institutional threshold
         rec["flow_score"] = _flow_score(pd.Series(rec))
         rec["signal"]     = _signal_label(pd.Series(rec))
         sig_colors        = SIGNAL_COLORS.get(rec["signal"], ("#888780", "#F1EFE8"))

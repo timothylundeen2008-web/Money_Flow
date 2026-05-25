@@ -426,7 +426,7 @@ with st.spinner("Loading ETF flow data…"):
 if movers_df is not None and not movers_df.empty:
 
     # ── Filter controls ──────────────────────────────────────────────────────
-    col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
+    col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 1, 1])
     with col_f1:
         cats = ["All"] + sorted(movers_df["category"].unique().tolist())
         cat_filter = st.selectbox("Filter by category", cats, key="mover_cat", label_visibility="collapsed")
@@ -435,6 +435,12 @@ if movers_df is not None and not movers_df.empty:
         sig_filter = st.selectbox("Filter by signal", sigs, key="mover_sig", label_visibility="collapsed")
     with col_f3:
         top_n = st.selectbox("Show top", [10, 15, 20], key="mover_n", label_visibility="collapsed")
+    with col_f4:
+        vol_spike_only = st.toggle("🔊 Vol ≥1.5×", value=False, key="vol_spike",
+                                   help="Show only ETFs with volume ≥1.5× their 20-day average — institutional conviction threshold")
+    with col_f4:
+        vol_spike_only = st.toggle("🔊 Vol ≥1.5×", value=False, key="vol_spike",
+                                   help="Show only ETFs with volume ≥1.5× their 20-day average — the institutional conviction threshold")
 
     # Re-fetch with updated top_n if changed
     if top_n != 10:
@@ -445,6 +451,50 @@ if movers_df is not None and not movers_df.empty:
         display_df = display_df[display_df["category"] == cat_filter]
     if sig_filter != "All signals":
         display_df = display_df[display_df["signal"] == sig_filter]
+    if vol_spike_only:
+        display_df = display_df[display_df["vol_ratio"] >= 1.5]
+
+    # Banner when vol spike filter is active
+    if vol_spike_only:
+        spike_count = len(display_df)
+        if spike_count > 0:
+            st.markdown(f"""
+            <div style="background:rgba(29,158,117,0.12);border:1px solid rgba(29,158,117,0.4);
+                 border-radius:8px;padding:8px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+              <span style="font-size:18px">🔊</span>
+              <div>
+                <span style="font-weight:600;color:#1D9E75">{spike_count} ETF{"s" if spike_count!=1 else ""} with volume spike ≥1.5×</span>
+                <span style="font-size:12px;color:#6b7280;margin-left:8px">— institutional conviction signal active</span>
+              </div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style="background:rgba(136,135,128,0.1);border:1px solid rgba(136,135,128,0.3);
+                 border-radius:8px;padding:8px 14px;margin-bottom:10px">
+              <span style="color:#888780">⚪ No ETFs currently showing volume ≥1.5× — no confirmed institutional spike today</span>
+            </div>""", unsafe_allow_html=True)
+    if vol_spike_only:
+        display_df = display_df[display_df["vol_ratio"] >= 1.5]
+
+    # Banner when vol spike filter is active
+    if vol_spike_only:
+        spike_count = len(display_df)
+        if spike_count > 0:
+            st.markdown(f"""
+            <div style="background:rgba(29,158,117,0.12);border:1px solid rgba(29,158,117,0.4);
+                 border-radius:8px;padding:8px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+              <span style="font-size:18px">🔊</span>
+              <div>
+                <span style="font-weight:600;color:#1D9E75">{spike_count} ETF{"s" if spike_count!=1 else ""} showing volume spike ≥1.5×</span>
+                <span style="font-size:12px;color:#6b7280;margin-left:8px">— institutional conviction signal active</span>
+              </div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style="background:rgba(136,135,128,0.1);border:1px solid rgba(136,135,128,0.3);
+                 border-radius:8px;padding:8px 14px;margin-bottom:10px">
+              <span style="color:#888780">⚪ No ETFs currently showing volume ≥1.5× — no confirmed institutional spike today</span>
+            </div>""", unsafe_allow_html=True)
 
     # ── Rank cards ───────────────────────────────────────────────────────────
     for rank, (_, row) in enumerate(display_df.iterrows(), 1):
@@ -457,13 +507,16 @@ if movers_df is not None and not movers_df.empty:
             color = "#1D9E75" if v >= 0 else "#D85A30"
             return f'<div style="display:inline-flex;align-items:center;gap:4px;width:80px"><div style="height:6px;width:{pct:.0f}%;max-width:60px;background:{color};border-radius:3px"></div><span style="font-size:10px;color:{"#1D9E75" if v>=0 else "#D85A30"};font-weight:500">{fmt_pct(v)}</span></div>'
 
-        vol_color = "#1D9E75" if row["vol_ratio"] > 1.2 else "#D85A30" if row["vol_ratio"] < 0.8 else "#888780"
+        vol_spike   = row["vol_ratio"] >= 1.5
+        vol_color   = "#1D9E75" if row["vol_ratio"] >= 1.5 else "#2BAD7E" if row["vol_ratio"] > 1.2 else "#D85A30" if row["vol_ratio"] < 0.8 else "#888780"
         spread_color = "#1D9E75" if row["spread"] > 0 else "#D85A30"
 
+        border_style = "1.5px solid rgba(29,158,117,0.6)" if vol_spike else "0.5px solid rgba(255,255,255,0.08)"
+        glow_style   = "box-shadow:0 0 12px rgba(29,158,117,0.2);" if vol_spike else ""
         st.markdown(f"""
         <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;
              background:var(--secondary-background-color);border-radius:10px;
-             border:0.5px solid rgba(255,255,255,0.08);margin-bottom:6px;">
+             border:{border_style};{glow_style}margin-bottom:6px;">
 
           <!-- Rank -->
           <div style="font-size:18px;font-weight:700;color:#6b7280;width:24px;text-align:center;flex-shrink:0">
@@ -508,7 +561,9 @@ if movers_df is not None and not movers_df.empty:
             <div style="font-size:11px;color:#6b7280">Spread</div>
             <div style="font-size:13px;font-weight:600;color:{spread_color}">{fmt_pct(row["spread"])}</div>
             <div style="font-size:10px;color:#6b7280;margin-top:3px">Vol ×{row["vol_ratio"]:.1f}</div>
-            <div style="font-size:10px;color:{vol_color}">{"↑ Heavy" if row["vol_ratio"]>1.3 else "↓ Light" if row["vol_ratio"]<0.8 else "Normal"}</div>
+            <div style="font-size:{"12px" if vol_spike else "10px"};font-weight:{"700" if vol_spike else "400"};color:{vol_color}">
+              {"🔊 SPIKE" if vol_spike else ("↑ Heavy" if row["vol_ratio"]>1.3 else "↓ Light" if row["vol_ratio"]<0.8 else "Normal")}
+            </div>
           </div>
 
           <!-- Flow score -->
