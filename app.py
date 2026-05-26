@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timedelta
 
 from data_fetcher import fetch_sector_data, get_cache_age_minutes
-from top_movers import fetch_top_movers, SIGNAL_COLORS
+from top_movers import fetch_top_movers, fetch_sector_flow_data, SIGNAL_COLORS, TIER_THRESHOLDS, TIER_LABELS
 from rotation_math import (
     compute_rs_ratio,
     compute_rs_momentum,
@@ -415,6 +415,183 @@ with st.expander("📋 Raw data table"):
     )
 
 
+
+# ── Sector Rotation Flow Visualization ────────────────────────────────────────
+st.markdown("---")
+st.markdown("## 🌊 Sector Money Flow & Rotation")
+st.caption("Aggregate institutional flow scores across all ETF categories · Where capital is moving right now")
+
+with st.spinner("Loading sector flow data…"):
+    flow_df = fetch_sector_flow_data()
+
+if flow_df is not None and not flow_df.empty:
+
+    # Aggregate by category
+    agg = (flow_df.groupby("category")
+           .agg(
+               avg_flow   =("flow_score",  "mean"),
+               avg_spread =("spread",      "mean"),
+               avg_1m     =("perf_1m",     "mean"),
+               avg_3m     =("perf_3m",     "mean"),
+               vol_spikes =("vol_spike",   "sum"),
+               etf_count  =("ticker",      "count"),
+           )
+           .reset_index()
+           .sort_values("avg_flow", ascending=False))
+
+    agg["inflow_pct"] = (agg["avg_flow"] - agg["avg_flow"].min()) /                         (agg["avg_flow"].max() - agg["avg_flow"].min() + 0.001) * 100
+
+    # ── Chart 1: Horizontal Flow Bar (ranked inflow strength) ──────────────
+    col_flow1, col_flow2 = st.columns([3, 2])
+
+    with col_flow1:
+        st.markdown('<div class="section-label">Inflow strength by category — ranked</div>', unsafe_allow_html=True)
+
+        fig_flow = go.Figure()
+        for _, row in agg.sort_values("avg_flow").iterrows():
+            v = row["avg_flow"]
+            color = ("#1D9E75" if v > 8 else "#2BAD7E" if v > 4 else
+                     "#378ADD" if v > 0 else "#D85A30" if v > -4 else "#A32D2D")
+            spike_marker = " 🔊" if row["vol_spikes"] > 0 else ""
+            fig_flow.add_trace(go.Bar(
+                x=[v],
+                y=[f"{row['category']}{spike_marker}"],
+                orientation="h",
+                marker_color=color,
+                marker_line_width=0,
+                width=0.65,
+                hovertemplate=(
+                    f"<b>{row['category']}</b><br>"
+                    f"Flow Score: {v:.1f}<br>"
+                    f"Avg 1M: {fmt_pct(row['avg_1m'])}<br>"
+                    f"Avg Spread: {fmt_pct(row['avg_spread'])}<br>"
+                    f"Vol Spikes: {int(row['vol_spikes'])}/{int(row['etf_count'])} ETFs"
+                    f"<extra></extra>"
+                ),
+                showlegend=False,
+            ))
+        fig_flow.add_vline(x=0, line_width=1, line_color="rgba(136,135,128,0.4)")
+        fig_flow.update_layout(
+            height=360,
+            margin=dict(l=10, r=20, t=10, b=30),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            xaxis=dict(title="Aggregate Flow Score", gridcolor="rgba(255,255,255,0.06)",
+                       zeroline=False, tickfont=dict(size=10)),
+            yaxis=dict(gridcolor="rgba(0,0,0,0)", tickfont=dict(size=11)),
+            bargap=0.25,
+        )
+        st.plotly_chart(fig_flow, use_container_width=True, config={"displayModeBar": False})
+
+    with col_flow2:
+        st.markdown('<div class="section-label">Flow summary</div>', unsafe_allow_html=True)
+
+        top3    = agg.head(3)
+        bottom3 = agg.tail(3)
+
+        st.markdown("**💚 Top inflows**")
+        for _, r in top3.iterrows():
+            spikes = f" · 🔊 {int(r['vol_spikes'])} spike{'s' if r['vol_spikes']!=1 else ''}" if r["vol_spikes"] > 0 else ""
+            st.markdown(f"""
+            <div style="padding:6px 10px;background:rgba(29,158,117,0.1);border-left:3px solid #1D9E75;
+                 border-radius:4px;margin-bottom:4px">
+              <span style="font-weight:600;color:#f0f0f0">{r['category']}</span>
+              <span style="color:#1D9E75;font-size:12px;margin-left:6px">Score {r['avg_flow']:.1f}</span>
+              <span style="font-size:11px;color:#6b7280">{spikes}</span><br>
+              <span style="font-size:11px;color:#9ca3af">1M: {fmt_pct(r['avg_1m'])} · Spread: {fmt_pct(r['avg_spread'])}</span>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("**🔴 Top outflows**")
+        for _, r in bottom3.iterrows():
+            st.markdown(f"""
+            <div style="padding:6px 10px;background:rgba(168,45,45,0.1);border-left:3px solid #A32D2D;
+                 border-radius:4px;margin-bottom:4px">
+              <span style="font-weight:600;color:#f0f0f0">{r['category']}</span>
+              <span style="color:#D85A30;font-size:12px;margin-left:6px">Score {r['avg_flow']:.1f}</span><br>
+              <span style="font-size:11px;color:#9ca3af">1M: {fmt_pct(r['avg_1m'])} · Spread: {fmt_pct(r['avg_spread'])}</span>
+            </div>""", unsafe_allow_html=True)
+
+    # ── Chart 2: Bubble chart — Spread (x) vs Vol Spikes (y) vs Flow (size) ──
+    st.markdown('<div class="section-label" style="margin-top:12px">Rotation map — spread acceleration vs volume conviction</div>', unsafe_allow_html=True)
+    st.caption("Bubble size = Flow Score · Right = accelerating above trend · Up = more vol spikes · Green = inflow · Red = outflow")
+
+    fig_bubble = go.Figure()
+    for _, row in agg.iterrows():
+        v     = row["avg_flow"]
+        color = ("#1D9E75" if v > 6 else "#2BAD7E" if v > 2 else
+                 "#378ADD" if v > 0 else "#D85A30" if v > -4 else "#A32D2D")
+        size  = max(20, min(60, abs(v) * 4 + 20))
+        fig_bubble.add_trace(go.Scatter(
+            x=[row["avg_spread"]],
+            y=[row["vol_spikes"]],
+            mode="markers+text",
+            name=row["category"],
+            text=[row["category"]],
+            textposition="top center",
+            textfont=dict(size=10, color="#e5e7eb"),
+            marker=dict(
+                size=size, color=color,
+                line=dict(color="rgba(255,255,255,0.2)", width=1),
+                opacity=0.85,
+            ),
+            hovertemplate=(
+                f"<b>{row['category']}</b><br>"
+                f"Avg Spread: {row['avg_spread']:.2f}%<br>"
+                f"Vol Spikes: {int(row['vol_spikes'])}<br>"
+                f"Flow Score: {v:.1f}<br>"
+                f"Avg 1M: {fmt_pct(row['avg_1m'])}"
+                f"<extra></extra>"
+            ),
+            showlegend=False,
+        ))
+
+    # Quadrant lines
+    fig_bubble.add_vline(x=0, line_width=1, line_color="rgba(136,135,128,0.3)", line_dash="dot")
+    fig_bubble.add_hline(y=0.5, line_width=1, line_color="rgba(136,135,128,0.3)", line_dash="dot")
+
+    # Quadrant labels
+    for label, x, y, color in [
+        ("↗ HOT MONEY",   2.5, agg["vol_spikes"].max()*0.9, "#1D9E75"),
+        ("↘ ACCUMULATE",  2.5, -0.3,                         "#378ADD"),
+        ("↖ DISTRIBUTION",-2, agg["vol_spikes"].max()*0.9,  "#D85A30"),
+        ("↙ OUTFLOW",     -2, -0.3,                          "#888780"),
+    ]:
+        fig_bubble.add_annotation(x=x, y=y, text=label, showarrow=False,
+            font=dict(size=9, color=color), opacity=0.6)
+
+    fig_bubble.update_layout(
+        height=320,
+        margin=dict(l=40, r=20, t=10, b=40),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(title="Avg Spread (1M vs 3M run-rate)", gridcolor="rgba(255,255,255,0.06)",
+                   zeroline=False, ticksuffix="%", tickfont=dict(size=10)),
+        yaxis=dict(title="# ETFs with Vol Spike", gridcolor="rgba(255,255,255,0.06)",
+                   zeroline=False, tickfont=dict(size=10)),
+    )
+    st.plotly_chart(fig_bubble, use_container_width=True, config={"displayModeBar": False})
+
+    # ── Threshold reference table ──────────────────────────────────────────
+    with st.expander("📊 Volume spike threshold reference — data-driven by ADV tier"):
+        st.markdown("""
+        Thresholds are set by **Average Daily Dollar Volume (ADDV)** — the higher the liquidity,
+        the larger the spike needed to confirm institutional conviction:
+
+        | Tier | Liquidity | ADDV | Spike Threshold | Examples | Why |
+        |---|---|---|---|---|---|
+        | **1** | Mega Liquid | >$2B/day | **1.25×** | QQQ, XLK, XLF, XLV | At $2B+ ADV, institutions move $500M routinely. 1.25× = $500M extra in one session = directional conviction |
+        | **2** | High Liquid | $200M–$2B | **1.50×** | XLE, XLI, GLD, TLT, IWM | Classic institutional threshold. Filters noise, catches real rotation flows |
+        | **3** | Moderate | $50M–$200M | **2.00×** | SMH, IBB, ITA, KRE | Single large hedge fund trade = 1.5×. Need 2× for broad confirmation |
+        | **4** | Lower Liquid | <$50M/day | **3.00×** | XBI, SKYY, HACK, DBA | Retail noise spikes these 1.5–2× routinely. 3× = real institutional entry |
+
+        *Source: ValuEngine (Oct 2024), SeekingAlpha ADV data, Oxford Academic ETF Liquidity study,
+        Morpheus Trading institutional volume research*
+        """)
+
+else:
+    st.info("Sector flow data unavailable. Refresh to retry.", icon="📡")
+
+
 # ── Where's the Money — Top 10 ETF Flow Panel ──────────────────────────────────
 st.markdown("---")
 st.markdown("## 💸 Where's the Money")
@@ -437,7 +614,7 @@ if movers_df is not None and not movers_df.empty:
         top_n = st.selectbox("Show top", [10, 15, 20], key="mover_n", label_visibility="collapsed")
 
     with col_f4:
-        vol_spike_only = st.toggle("🔊 Vol ≥1.5×", value=False, key="vol_spike_filter",
+        vol_spike_only = st.toggle("🔊 Vol Spike Filter", value=False, key="vol_spike_filter",
                                    help="Show only ETFs with volume ≥1.5× their 20-day average — the institutional conviction threshold")
 
     # Re-fetch with updated top_n if changed
@@ -450,7 +627,7 @@ if movers_df is not None and not movers_df.empty:
     if sig_filter != "All signals":
         display_df = display_df[display_df["signal"] == sig_filter]
     if vol_spike_only:
-        display_df = display_df[display_df["vol_ratio"] >= 1.5]
+        display_df = display_df[display_df["vol_spike"] == True]
 
     # Banner when vol spike filter is active
     if vol_spike_only:
@@ -472,7 +649,7 @@ if movers_df is not None and not movers_df.empty:
               <span style="color:#888780">⚪ No ETFs currently showing volume ≥1.5× — no confirmed institutional spike today</span>
             </div>""", unsafe_allow_html=True)
     if vol_spike_only:
-        display_df = display_df[display_df["vol_ratio"] >= 1.5]
+        display_df = display_df[display_df["vol_spike"] == True]
 
     # Banner when vol spike filter is active
     if vol_spike_only:
@@ -528,10 +705,13 @@ if movers_df is not None and not movers_df.empty:
             <div style="font-size:10px;color:#4b5563;margin-top:1px">{row["category"]}</div>
           </div>
 
-          <!-- Signal badge -->
-          <div style="flex:0 0 140px">
+          <!-- Signal badge + tier -->
+          <div style="flex:0 0 155px">
             <span style="background:{sig_bg};color:{sig_fg};font-size:10px;font-weight:600;
                   padding:3px 8px;border-radius:6px">{row["signal"]}</span>
+            <div style="margin-top:4px;font-size:9px;color:#6b7280">
+              {row["tier_label"]} · spike≥{row["spike_label"]}
+            </div>
           </div>
 
           <!-- Perf bars -->
