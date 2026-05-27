@@ -420,8 +420,8 @@ with st.expander("📋 Raw data table"):
 
 # ── CAPE / Valuation Panel ─────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown("## 📐 Sector Valuation — CAPE & P/E")
-st.caption("Cyclically Adjusted P/E vs each sector's own historical average · Refreshes every 6 hours")
+st.markdown("## 📐 Sector Valuation — P/E & Relative Value")
+st.caption("Weighted P/E of top holdings vs each sector's own historical average · Refreshes every 6 hours")
 
 with st.spinner("Loading valuation data…"):
     val_df = fetch_valuation_data()
@@ -435,14 +435,14 @@ if val_df is not None and not val_df.empty:
     # Build plotly table
     val_sorted = val_df.sort_values("premium_pct", ascending=False, na_position="last")
 
-    hm_headers = ["Sector", "Method", "CAPE / P/E", "Hist Avg", "vs Avg", "Fwd P/E", "P/B", "Signal"]
+    hm_headers = ["Sector", "Method", "TTM P/E", "Hist Avg P/E", "vs Avg", "Fwd P/E", "P/B", "Signal"]
     cell_sector  = val_sorted["sector"].tolist()
     cell_method  = val_sorted["method"].tolist()
-    cell_cape    = [f"{v:.1f}" if pd.notna(v) else "—" for v in val_sorted["cape"]]
-    cell_hist    = [f"{v:.1f}" for v in val_sorted["hist_avg_cape"]]
+    cell_cape    = [f"{v:.1f}" if pd.notna(v) else "—" for v in val_sorted["ttm_pe"]]
+    cell_hist    = [f"{v:.1f}" for v in val_sorted["hist_avg_pe"]]
     cell_prem    = [f"{'+' if v>=0 else ''}{v:.1f}%" if pd.notna(v) else "—"
                     for v in val_sorted["premium_pct"]]
-    cell_fwd     = [f"{v:.1f}" if pd.notna(v) else "—" for v in val_sorted["forward_pe"]]
+    cell_fwd     = [f"{v:.1f}" if pd.notna(v) else "—" for v in val_sorted["fwd_pe"]]
     cell_pb      = [f"{v:.1f}" if pd.notna(v) else "—" for v in val_sorted["pb"]]
     cell_signal  = val_sorted["valuation_signal"].tolist()
 
@@ -524,7 +524,7 @@ if val_df is not None and not val_df.empty:
 
     fig_scatter = go.Figure()
     for _, row in val_sorted.iterrows():
-        cape_v   = row["cape"]
+        cape_v = row["ttm_pe"]
         prem_v   = row["premium_pct"]
         if pd.isna(cape_v) or pd.isna(prem_v):
             continue
@@ -544,7 +544,7 @@ if val_df is not None and not val_df.empty:
                         opacity=0.85),
             hovertemplate=(
                 f"<b>{row['sector']}</b><br>"
-                f"CAPE: {cape_v:.1f} ({row['method']})<br>"
+                f"TTM P/E: {cape_v:.1f} ({row['method']})<br>"
                 f"vs Hist Avg: {prem_v:+.1f}%<br>"
                 f"RS-Ratio: {rs:.1f}<br>"
                 f"Signal: {row['valuation_signal']}"
