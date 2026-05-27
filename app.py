@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timedelta
 
 from data_fetcher import fetch_sector_data, get_cache_age_minutes
+from valuation import fetch_valuation_data, VALUATION_COLORS
 from top_movers import fetch_top_movers, fetch_sector_flow_data, SIGNAL_COLORS, TIER_THRESHOLDS, TIER_LABELS
 from rotation_math import (
     compute_rs_ratio,
@@ -414,6 +415,201 @@ with st.expander("📋 Raw data table"):
         mime="text/csv",
     )
 
+
+
+
+# ── CAPE / Valuation Panel ─────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown("## 📐 Sector Valuation — CAPE & P/E")
+st.caption("Cyclically Adjusted P/E vs each sector's own historical average · Refreshes every 6 hours")
+
+with st.spinner("Loading valuation data…"):
+    val_df = fetch_valuation_data()
+
+if val_df is not None and not val_df.empty:
+
+    # ── Valuation heatmap row ────────────────────────────────────────────────
+    st.markdown('<div class="section-label">Valuation vs historical average — green = cheap, red = expensive</div>',
+                unsafe_allow_html=True)
+
+    # Build plotly table
+    val_sorted = val_df.sort_values("premium_pct", ascending=False, na_position="last")
+
+    hm_headers = ["Sector", "Method", "CAPE / P/E", "Hist Avg", "vs Avg", "Fwd P/E", "P/B", "Signal"]
+    cell_sector  = val_sorted["sector"].tolist()
+    cell_method  = val_sorted["method"].tolist()
+    cell_cape    = [f"{v:.1f}" if pd.notna(v) else "—" for v in val_sorted["cape"]]
+    cell_hist    = [f"{v:.1f}" for v in val_sorted["hist_avg_cape"]]
+    cell_prem    = [f"{'+' if v>=0 else ''}{v:.1f}%" if pd.notna(v) else "—"
+                    for v in val_sorted["premium_pct"]]
+    cell_fwd     = [f"{v:.1f}" if pd.notna(v) else "—" for v in val_sorted["forward_pe"]]
+    cell_pb      = [f"{v:.1f}" if pd.notna(v) else "—" for v in val_sorted["pb"]]
+    cell_signal  = val_sorted["valuation_signal"].tolist()
+
+    fill_signal  = val_sorted["signal_bg"].tolist()
+    font_signal  = val_sorted["signal_fg"].tolist()
+    fill_prem    = []
+    font_prem    = []
+    for v in val_sorted["premium_pct"]:
+        if pd.isna(v):
+            fill_prem.append("#1e2330"); font_prem.append("#888780")
+        elif v > 20:
+            fill_prem.append("#2e1208"); font_prem.append("#D04020")
+        elif v > 0:
+            fill_prem.append("#2e2008"); font_prem.append("#BA7517")
+        elif v > -15:
+            fill_prem.append("#0d3326"); font_prem.append("#1D9E75")
+        else:
+            fill_prem.append("#0e2240"); font_prem.append("#378ADD")
+
+    base_fill = "#1e2330"
+    base_font = "#e5e7eb"
+
+    fig_val = go.Figure(go.Table(
+        columnwidth=[160, 90, 80, 80, 90, 80, 60, 130],
+        header=dict(
+            values=[f"<b>{h}</b>" for h in hm_headers],
+            fill_color="#131720",
+            font=dict(color="#f0f0f0", size=12),
+            align=["left","center","center","center","center","center","center","center"],
+            height=32, line_color="rgba(255,255,255,0.08)",
+        ),
+        cells=dict(
+            values=[cell_sector, cell_method, cell_cape, cell_hist,
+                    cell_prem, cell_fwd, cell_pb, cell_signal],
+            fill_color=[
+                [base_fill]*len(val_sorted),
+                [base_fill]*len(val_sorted),
+                [base_fill]*len(val_sorted),
+                [base_fill]*len(val_sorted),
+                fill_prem,
+                [base_fill]*len(val_sorted),
+                [base_fill]*len(val_sorted),
+                fill_signal,
+            ],
+            font=dict(
+                color=[
+                    [base_font]*len(val_sorted),
+                    ["#6b7280"]*len(val_sorted),
+                    [base_font]*len(val_sorted),
+                    ["#6b7280"]*len(val_sorted),
+                    font_prem,
+                    [base_font]*len(val_sorted),
+                    [base_font]*len(val_sorted),
+                    font_signal,
+                ],
+                size=12,
+            ),
+            align=["left","center","center","center","center","center","center","center"],
+            height=30, line_color="rgba(255,255,255,0.05)",
+        ),
+    ))
+    fig_val.update_layout(
+        height=len(val_sorted)*32+70,
+        margin=dict(l=0,r=0,t=0,b=0),
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+    st.plotly_chart(fig_val, use_container_width=True, config={"displayModeBar": False})
+
+    # ── CAPE vs Flow Score scatter ────────────────────────────────────────────
+    st.markdown('<div class="section-label" style="margin-top:8px">Valuation vs momentum — the sweet spot is bottom-right (cheap + strong flow)</div>',
+                unsafe_allow_html=True)
+    st.caption("X-axis = premium vs historical avg (left = cheap). Y-axis = sector flow score from rotation dashboard. Size = distance from fair value.")
+
+    # Merge with sector flow scores from rotation df
+    if "df" in dir() and df is not None and not df.empty:
+        flow_map = df.set_index("sector")["rs_ratio"].to_dict() if "rs_ratio" in df.columns else {}
+    else:
+        flow_map = {}
+
+    fig_scatter = go.Figure()
+    for _, row in val_sorted.iterrows():
+        cape_v   = row["cape"]
+        prem_v   = row["premium_pct"]
+        if pd.isna(cape_v) or pd.isna(prem_v):
+            continue
+        rs = flow_map.get(row["sector"], 100)
+        color = row["signal_fg"]
+        size  = max(20, min(55, abs(prem_v) * 1.5 + 20))
+
+        fig_scatter.add_trace(go.Scatter(
+            x=[prem_v],
+            y=[rs],
+            mode="markers+text",
+            text=[row["ticker"]],
+            textposition="top center",
+            textfont=dict(size=10, color="#e5e7eb"),
+            marker=dict(size=size, color=color,
+                        line=dict(color="rgba(255,255,255,0.15)", width=1),
+                        opacity=0.85),
+            hovertemplate=(
+                f"<b>{row['sector']}</b><br>"
+                f"CAPE: {cape_v:.1f} ({row['method']})<br>"
+                f"vs Hist Avg: {prem_v:+.1f}%<br>"
+                f"RS-Ratio: {rs:.1f}<br>"
+                f"Signal: {row['valuation_signal']}"
+                f"<extra></extra>"
+            ),
+            showlegend=False,
+        ))
+
+    # Sweet spot annotation
+    fig_scatter.add_annotation(
+        x=-20, y=103, text="⭐ Sweet Spot<br>Cheap + Strong Flow",
+        showarrow=False, font=dict(size=9, color="#1D9E75"),
+        bgcolor="rgba(13,51,38,0.6)", bordercolor="#1D9E75",
+        borderwidth=1, borderpad=4,
+    )
+    fig_scatter.add_vline(x=0, line_width=1, line_color="rgba(136,135,128,0.3)", line_dash="dot")
+    fig_scatter.add_hline(y=100, line_width=1, line_color="rgba(136,135,128,0.3)", line_dash="dot")
+    fig_scatter.add_annotation(x=25,  y=96.5, text="Expensive + Weak", showarrow=False,
+        font=dict(size=9, color="#888780"), opacity=0.6)
+    fig_scatter.add_annotation(x=-20, y=96.5, text="Cheap + Weak",     showarrow=False,
+        font=dict(size=9, color="#888780"), opacity=0.6)
+    fig_scatter.add_annotation(x=25,  y=103,  text="Expensive + Strong", showarrow=False,
+        font=dict(size=9, color="#888780"), opacity=0.6)
+
+    fig_scatter.update_layout(
+        height=340,
+        margin=dict(l=40, r=20, t=10, b=40),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(title="Premium vs Historical Avg CAPE (%)",
+                   gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+                   ticksuffix="%", tickfont=dict(size=10)),
+        yaxis=dict(title="RS-Ratio (Relative Strength)",
+                   gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+                   tickfont=dict(size=10)),
+    )
+    st.plotly_chart(fig_scatter, use_container_width=True, config={"displayModeBar": False})
+
+    with st.expander("📐 How sector CAPE is calculated"):
+        st.markdown("""
+        **CAPE (Cyclically Adjusted P/E)** smooths earnings over multiple years to remove
+        single-year distortions from recessions, booms, and one-time items.
+
+        | Situation | Method used | Why |
+        |---|---|---|
+        | 8+ quarters of EPS history | **Adj. P/E (Xy)** — inflation-adjusted, multi-year avg | Most accurate, closest to true Shiller CAPE |
+        | Less than 8 quarters | **TTM P/E** — trailing 12-month | Limited history, no cyclical smoothing |
+        | No EPS data | **N/A** | ETF structure makes EPS unavailable |
+
+        **Inflation adjustment:** each historical EPS is converted to today's dollars using
+        CPI data from the Federal Reserve (FRED). This is the same adjustment Shiller uses.
+
+        **"vs Avg" column:** compares current CAPE to the sector's long-run historical average
+        (1990–2024). A sector at +25% vs its own average is expensive *for that sector* —
+        more meaningful than comparing Tech at 35 vs Utilities at 17, which are structurally different.
+
+        **The sweet spot:** sectors in the bottom-left of the scatter (cheap vs history) that are
+        also in the Leading or Improving quadrant of the RRG — value *and* momentum together.
+        That combination has historically produced the strongest risk-adjusted returns.
+
+        *Sources: Research Affiliates RAFI, StarCapital sector CAPE, S&P Dow Jones historical P/E,
+        Federal Reserve FRED CPI data*
+        """)
+else:
+    st.info("Valuation data unavailable. Refresh to retry.", icon="📡")
 
 
 # ── Sector Rotation Flow Visualization ────────────────────────────────────────
