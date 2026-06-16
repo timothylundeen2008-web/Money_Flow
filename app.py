@@ -280,12 +280,18 @@ with col_rrg:
         stealth     = row.get("stealth_signal", "None")
 
         # Draw arrow from prev → current
+        # Plotly rejects hex+"99" opacity suffix — must use rgba()
+        def _hex_rgba(hex_c: str, alpha: float = 0.6) -> str:
+            h = hex_c.lstrip("#")
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+            return f"rgba({r},{g},{b},{alpha})"
+
         if abs(rx - px) > 0.05 or abs(ry - py) > 0.05:
             fig_rrg.add_annotation(
                 x=rx, y=ry, ax=px, ay=py,
                 xref="x", yref="y", axref="x", ayref="y",
                 showarrow=True, arrowhead=2, arrowsize=1.2,
-                arrowwidth=1.5, arrowcolor=color + "99",
+                arrowwidth=1.5, arrowcolor=_hex_rgba(color, 0.6),
             )
 
         # Marker: larger + pulsing ring for Improving
