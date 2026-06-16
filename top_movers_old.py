@@ -1,48 +1,31 @@
-# VERSION: v4-final-20260616 — volume spike fix: today-only vs rolling avg
+# VERSION: v3-final-20260526 — DO NOT EDIT MANUALLY
 """
-top_movers.py  (v4 — corrected volume spike detection)
+top_movers.py  (v3 — tiered volume thresholds + rotation flow data)
 ────────────────────────────────────────────────────────────────────
-VOLUME SPIKE FIX (v3 to v4):
-
-  v3 bug:  recent = v.iloc[-5:].mean()   -- 5-day average vs 20-day baseline
-  v4 fix:  today  = v.iloc[-1]           -- today ONLY vs 20-day rolling avg
-
-  Why this matters:
-    A single block trade or institutional entry happens in ONE session.
-    Averaging 5 days around it dilutes a genuine 5x spike to ~1.8x --
-    destroying the signal. The fix compares today's exact session volume
-    to the prior 20-day average (standard Bloomberg/FactSet methodology).
-
-  Secondary confirmation added:
-    vol_ratio_50d  = today vs prior 50-day avg
-    vol_spike_both = True when BOTH 20-day and 50-day thresholds are breached
-    Dual confirmation earns +13 pts in flow_score (vs +8 for single window).
-    "Strong Accumulation" / "Strong Distribution" now require dual confirm.
-
 Data-driven volume spike thresholds based on Average Daily Dollar Volume (ADDV).
-"""
 
-# THRESHOLD RESEARCH (sources: ValuEngine Oct 2024, SeekingAlpha, Morpheus Trading,
-#                              Oxford Academic RFS ETF Liquidity study):
-#
-#   Tier 1  >$2B ADDV   -- 1.25x threshold
-#     XLK ($2.74B), XLF, XLV ($7B), QQQ, SPY
-#     At $2B+ daily, institutions move $500M routinely. Only 1.25x+ = directional
-#     conviction. 1.5x on these = massive event (earnings, macro shock).
-#
-#   Tier 2  $200M-$2B   -- 1.50x threshold  (the classic institutional signal)
-#     Most SPDR sector ETFs (XLE, XLI, XLY, XLC, XLP, XLU, XLRE, XLB), IWM, GLD, TLT
-#     $200M-$2B ADV: 1.5x filters noise, catches real rotation flows.
-#
-#   Tier 3  $50M-$200M  -- 2.00x threshold
-#     Sub-sector ETFs: SMH, IBB, ITA, PAVE, KRE, EEM, HYG
-#     At this level a single large hedge fund trade = 1.5x. Need 2.0x for
-#     broad institutional confirmation.
-#
-#   Tier 4  <$50M       -- 3.00x threshold
-#     Niche/thematic: XBI, SKYY, HACK, AMLP, DBA
-#     Retail noise routinely spikes these 1.5-2x. 3.0x = real institutional entry.
-#     Treat as early-signal requiring next-day confirmation.
+THRESHOLD RESEARCH (sources: ValuEngine Oct 2024, SeekingAlpha, Morpheus Trading,
+                             Oxford Academic RFS ETF Liquidity study):
+
+  Tier 1  >$2B ADDV   → 1.25x threshold
+    XLK ($2.74B), XLF, XLV ($7B), QQQ, SPY
+    At $2B+ daily, institutions move $500M routinely. Only 1.25x+ = directional
+    conviction. 1.5x on these = massive event (earnings, macro shock).
+
+  Tier 2  $200M–$2B   → 1.50x threshold  (the classic institutional signal)
+    Most SPDR sector ETFs (XLE, XLI, XLY, XLC, XLP, XLU, XLRE, XLB), IWM, GLD, TLT
+    $200M–$2B ADV: 1.5x filters noise, catches real rotation flows.
+
+  Tier 3  $50M–$200M  → 2.00x threshold
+    Sub-sector ETFs: SMH, IBB, ITA, PAVE, KRE, EEM, HYG
+    At this level a single large hedge fund trade = 1.5x. Need 2.0x for
+    broad institutional confirmation.
+
+  Tier 4  <$50M       → 3.00x threshold
+    Niche/thematic: XBI, SKYY, HACK, AMLP, DBA
+    Retail noise routinely spikes these 1.5–2x. 3.0x = real institutional entry.
+    Treat as early-signal requiring next-day confirmation.
+"""
 
 import time
 import requests
@@ -192,51 +175,11 @@ def _pct(s, days):
 
 
 def _vol_ratio(v):
-    """
-    Compare TODAY'S single-session volume to the 20-day rolling average.
-
-    Why today-only (not 5-day average):
-      A block trade or institutional entry happens in ONE session.
-      Averaging 5 days dilutes a genuine spike by 80% — a 5x day
-      surrounded by 4 normal days reads as only 1.8x. That kills
-      the signal entirely for fast institutional entries.
-
-    Why 20-day rolling average as primary:
-      Standard institutional screening window (Bloomberg/FactSet default).
-      Long enough to smooth daily noise; short enough to reflect the
-      current liquidity regime (post-earnings, post-split, etc.)
-
-    Returns: today's volume / prior-20-day avg volume.
-    Values: 1.0 = normal | 2.0 = double avg | 3.0+ = institutional level
-    """
     v = v.dropna()
-    if len(v) < 22:
-        return 1.0
-    today_vol = v.iloc[-1]            # single session — today only
-    avg_20    = v.iloc[-21:-1].mean() # prior 20 sessions (excludes today)
-    if avg_20 == 0:
-        return 1.0
-    return round(today_vol / avg_20, 2)
-
-
-def _vol_ratio_50d(v):
-    """
-    Secondary confirmation: today's volume vs 50-day rolling average.
-
-    Both _vol_ratio() AND _vol_ratio_50d() elevated = stronger signal.
-    50-day baseline catches slow drift in a ticker's normal volume regime
-    that a 20-day window might miss (e.g. post-earnings quiet period).
-
-    Returns: today's volume / prior-50-day avg volume.
-    """
-    v = v.dropna()
-    if len(v) < 52:
-        return 1.0
-    today_vol = v.iloc[-1]
-    avg_50    = v.iloc[-51:-1].mean()
-    if avg_50 == 0:
-        return 1.0
-    return round(today_vol / avg_50, 2)
+    if len(v) < 25: return 1.0
+    recent   = v.iloc[-5:].mean()
+    baseline = v.iloc[-25:-5].mean()
+    return round(recent/baseline, 2) if baseline != 0 else 1.0
 
 
 def _addv_usd(c, v):
@@ -254,16 +197,12 @@ def _signal_label(row):
     vol       = row.get("vol_ratio", 1.0)
     perf_1m   = row["perf_1m"]
     threshold = row.get("spike_threshold", 1.5)
-    spike     = vol >= threshold                         # 20-day primary
-    dual      = row.get("vol_spike_both", False)        # 20-day + 50-day confirmed
+    spike     = vol >= threshold
 
-    # Dual-confirmation (both 20d and 50d) = strongest institutional signal
-    if dual and spread > 1.5 and perf_1m > 0: return "Strong Accumulation"
-    if dual and perf_1m < 0  and spread < -1: return "Strong Distribution"
-    # Single-window spike (20-day vs avg)
+    if spike and spread > 1.5 and perf_1m > 0: return "Strong Accumulation"
     if spike and spread > 0   and perf_1m > 0: return "Accumulation"
+    if spike and perf_1m < 0  and spread < -1: return "Strong Distribution"
     if spike and perf_1m < 0:                  return "Distribution"
-    # No spike — price/spread driven signals
     if spread > 1.5 and vol > 1.1:             return "Accumulation"
     if perf_1m > 0  and spread > 0:            return "Inflow"
     if spread < -1.5 and vol < 0.9:            return "Distribution"
@@ -281,15 +220,8 @@ def _flow_score(row):
     vol_conf    = min(float(row.get("vol_ratio", 1.0)), 3.0)
     consistency = sum(1 for p in perfs if p > 0) / 3
     score = (0.40*momentum + 0.30*accel*2 + 0.20*vol_conf*10 + 0.10*consistency*20)
-
-    # Single-window spike (20-day): +8 pts
     if row.get("vol_spike", False):
-        score += 8.0
-    # Dual-confirmation bonus: both 20-day AND 50-day thresholds breached
-    # This is the strongest institutional signal — add extra +5 on top
-    if row.get("vol_spike_both", False):
-        score += 5.0
-
+        score += 8.0    # bonus for crossing tier-appropriate threshold
     return round(score, 2)
 
 
@@ -309,8 +241,7 @@ def fetch_top_movers(top_n=10):
         v = volumes[ticker] if not volumes.empty and ticker in volumes.columns else pd.Series(dtype=float)
 
         threshold = TIER_THRESHOLDS[tier]
-        vol_r     = _vol_ratio(v)    if not v.empty else 1.0
-        vol_r_50  = _vol_ratio_50d(v) if not v.empty else 1.0
+        vol_r     = _vol_ratio(v) if not v.empty else 1.0
         addv      = _addv_usd(s, v) if not v.empty else 0.0
 
         rec = {
@@ -327,13 +258,10 @@ def fetch_top_movers(top_n=10):
             "perf_1w":         round(_pct(s, 5),  2),
             "perf_1m":         round(_pct(s, 21), 2),
             "perf_3m":         round(_pct(s, 63), 2),
-            "vol_ratio":       vol_r,      # today vs 20-day avg (primary)
-            "vol_ratio_50d":   vol_r_50,   # today vs 50-day avg (confirmation)
+            "vol_ratio":       vol_r,
         }
-        rec["spread"]          = round(rec["perf_1m"] - (rec["perf_3m"] / 3), 2)
-        rec["vol_spike"]       = vol_r >= threshold           # primary signal
-        rec["vol_spike_conf"]  = vol_r_50 >= threshold        # 50-day confirmation
-        rec["vol_spike_both"]  = rec["vol_spike"] and rec["vol_spike_conf"]  # dual confirm
+        rec["spread"]     = round(rec["perf_1m"] - (rec["perf_3m"] / 3), 2)
+        rec["vol_spike"]  = vol_r >= threshold
         rec["flow_score"] = _flow_score(pd.Series(rec))
         rec["signal"]     = _signal_label(pd.Series(rec))
         sc = SIGNAL_COLORS.get(rec["signal"], ("#888780", "#1e2330"))
@@ -364,8 +292,7 @@ def fetch_sector_flow_data():
         s = closes[ticker]
         v = volumes[ticker] if not volumes.empty and ticker in volumes.columns else pd.Series(dtype=float)
         threshold = TIER_THRESHOLDS[tier]
-        vol_r     = _vol_ratio(v)     if not v.empty else 1.0
-        vol_r_50  = _vol_ratio_50d(v) if not v.empty else 1.0
+        vol_r     = _vol_ratio(v) if not v.empty else 1.0
 
         rec = {
             "ticker": ticker, "name": name, "category": category, "tier": tier,
@@ -374,13 +301,10 @@ def fetch_sector_flow_data():
             "perf_1w":  round(_pct(s, 5),  2),
             "perf_1m":  round(_pct(s, 21), 2),
             "perf_3m":  round(_pct(s, 63), 2),
-            "vol_ratio":     vol_r,     # today vs 20-day avg (primary)
-            "vol_ratio_50d": vol_r_50,  # today vs 50-day avg (confirmation)
+            "vol_ratio": vol_r,
         }
-        rec["spread"]         = round(rec["perf_1m"] - (rec["perf_3m"] / 3), 2)
-        rec["vol_spike"]      = vol_r   >= threshold
-        rec["vol_spike_conf"] = vol_r_50 >= threshold
-        rec["vol_spike_both"] = rec["vol_spike"] and rec["vol_spike_conf"]
+        rec["spread"]    = round(rec["perf_1m"] - (rec["perf_3m"] / 3), 2)
+        rec["vol_spike"] = vol_r >= threshold
         rec["flow_score"]= _flow_score(pd.Series(rec))
         records.append(rec)
 
