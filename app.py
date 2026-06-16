@@ -401,36 +401,64 @@ with col_signals:
     signals_html = ""
     total = len(df)
     for _, row in df.sort_values("signal_rank").head(8).iterrows():
-        q         = row["quadrant"]
-        bc        = QUAD_COLORS[q]
-        spread_dir = "▲ Accumulation" if row["spread"] > 0 else "▼ Distribution"
+        q          = row["quadrant"]
+        bc         = QUAD_COLORS[q]
+        spread_dir = "Accumulation" if row["spread"] > 0 else "Distribution"
+        spread_arr = "&#9650;" if row["spread"] > 0 else "&#9660;"
         spread_c   = "#1D9E75" if row["spread"] > 0 else "#D85A30"
         direction  = row.get("rotation_direction", "Stable")
-        arrow      = DIRECTION_ARROWS.get(direction, "→")
+        arrow_map  = {
+            "Strengthening": "&#8599;",
+            "Topping":       "&#8600;",
+            "Weakening":     "&#8601;",
+            "Bottoming":     "&#8598;",
+            "Stable":        "&#8594;",
+        }
+        arrow      = arrow_map.get(direction, "&#8594;")
         stealth    = row.get("stealth_signal", "None")
-        stealth_tag = ' <span style="font-size:9px;background:rgba(83,74,183,0.3);color:#A09BE0;padding:1px 5px;border-radius:4px">🔍 STEALTH</span>' if stealth != "None" else ""
         rank_n     = int(row["signal_rank"])
+        rs_val     = float(row["rs_ratio"])
+        mom_val    = float(row["rs_momentum"])
+        spread_val = fmt_pct(float(row["spread"]))
+        sector_str = str(row["sector"])
+        ticker_str = str(row["ticker"])
 
-        signals_html += f"""
-        <div class="signal-row">
-          <span class="sig-badge" style="background:{bc['bg']};color:{bc['fg']}">{q}</span>
-          <div style="flex:1">
-            <div class="sig-sector">
-              {row['sector']}
-              <span style="font-size:11px;font-weight:400;color:#6b7280">{row['ticker']}</span>
-              {stealth_tag}
-            </div>
-            <div class="sig-detail" style="color:{spread_c}">{spread_dir} · spread {fmt_pct(row['spread'])}</div>
-            <div class="sig-detail">RS {row['rs_ratio']:.1f} · Mom {row['rs_momentum']:.1f} · {arrow} {direction}</div>
-          </div>
-          <div style="text-align:right;flex-shrink:0">
-            <div style="font-size:9px;color:#6b7280">RANK</div>
-            <div style="font-size:14px;font-weight:700;color:{bc['dot']}">{rank_n}<span style="font-size:10px;color:#6b7280">/{total}</span></div>
-          </div>
-        </div>"""
+        stealth_tag = ""
+        if stealth != "None":
+            stealth_tag = (
+                '<span style="font-size:9px;background:rgba(83,74,183,0.3);'
+                'color:#A09BE0;padding:1px 5px;border-radius:4px;margin-left:4px">'
+                '&#128269; STEALTH</span>'
+            )
 
-    st.markdown(f'<div class="dash-card" style="min-height:420px">{signals_html}</div>',
-                unsafe_allow_html=True)
+        badge_bg  = bc["bg"]
+        badge_fg  = bc["fg"]
+        dot_color = bc["dot"]
+
+        signals_html += (
+            '<div class="signal-row">'
+            f'<span class="sig-badge" style="background:{badge_bg};color:{badge_fg}">{q}</span>'
+            '<div style="flex:1">'
+            f'<div class="sig-sector">{sector_str} '
+            f'<span style="font-size:11px;font-weight:400;color:#6b7280">{ticker_str}</span>'
+            f'{stealth_tag}</div>'
+            f'<div class="sig-detail" style="color:{spread_c}">'
+            f'{spread_arr} {spread_dir} &middot; spread {spread_val}</div>'
+            f'<div class="sig-detail">RS {rs_val:.1f} &middot; Mom {mom_val:.1f} '
+            f'&middot; {arrow} {direction}</div>'
+            '</div>'
+            '<div style="text-align:right;flex-shrink:0">'
+            '<div style="font-size:9px;color:#6b7280">RANK</div>'
+            f'<div style="font-size:14px;font-weight:700;color:{dot_color}">'
+            f'{rank_n}<span style="font-size:10px;color:#6b7280">/{total}</span></div>'
+            '</div>'
+            '</div>'
+        )
+
+    st.markdown(
+        '<div class="dash-card" style="min-height:420px">' + signals_html + '</div>',
+        unsafe_allow_html=True,
+    )
 
 # ── Performance Heatmap ────────────────────────────────────────────────────────
 st.markdown('<div class="section-label">Performance heatmap · all timeframes</div>',
