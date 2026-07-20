@@ -22,18 +22,6 @@ CAPE approximation:
     • Fwd P/E   (next 12-month estimates)
     • "vs Avg"  (vs sector's own long-run historical average)
   Labeled as "Wtd. P/E" to be transparent about the method.
-
-v3 PATCH (July 2026 cross-dashboard audit):
-  This module previously had NO staleness flag — snapshot mode just said
-  "May 2025 estimates" with no age check, while the All-Weather app's
-  get_pe() tags every fallback with source/stale_days/stale (>45d). The
-  Level-3 rule ("verify the data-source/staleness flag on every multiple")
-  was unexecutable here. Now:
-    - SNAPSHOT_ASOF / HOLDINGS_ASOF constants declare the data vintages
-    - every row carries source ('live' | 'snapshot'), stale_days, stale
-    - snapshot mode banner reports its age and refuses the pretense of
-      freshness; stale snapshot verdicts are for qualitative context only,
-      never sizing
 """
 
 import time
@@ -59,14 +47,8 @@ SECTOR_ETFS = {
     "XLP":  "Consumer Defensive",
 }
 
-# Data vintages — bump these whenever the tables below are refreshed.
-# stale = older than STALE_AFTER_DAYS (matches the All-Weather app's 45-day rule).
-SNAPSHOT_ASOF    = "2025-05-15"   # _SNAPSHOT P/E estimates
-HOLDINGS_ASOF    = "2025-03-31"   # SECTOR_HOLDINGS top-5 weights (SSGA Q1 2025)
-STALE_AFTER_DAYS = 45
-
 # Top-5 holdings per SPDR ETF with approximate weights (updated periodically)
-# Source: SSGA ETF holdings as of Q1 2025 (see HOLDINGS_ASOF)
+# Source: SSGA ETF holdings as of Q1 2025
 SECTOR_HOLDINGS = {
     "XLK":  [("AAPL",0.22),("MSFT",0.20),("NVDA",0.18),("AVGO",0.05),("CRM",0.03)],
     "XLF":  [("BRK-B",0.13),("JPM",0.12),("V",0.09),("MA",0.07),("BAC",0.05)],
@@ -209,38 +191,20 @@ def fetch_valuation_data() -> pd.DataFrame:
     Returns valuation DataFrame for all 11 sector ETFs.
 
     Columns:
-        ticker, sector, source ('live'|'snapshot'), stale_days, stale,
-        ttm_pe, fwd_pe, pb, coverage, method,
+        ticker, sector, ttm_pe, fwd_pe, pb, coverage, method,
         hist_avg_pe, premium_pct, valuation_signal,
         signal_fg, signal_bg
-
-    Level-3 rule: if source='snapshot' and stale=True, every verdict from
-    this table is qualitative context only — never a sizing input.
     """
     # Try live holdings-based P/E
     holding_data = _fetch_holdings_pe()
     use_snapshot = len(holding_data) < 5
 
-    snap_stale_days = (datetime.now().date()
-                       - datetime.strptime(SNAPSHOT_ASOF, "%Y-%m-%d").date()).days
-    snap_stale = snap_stale_days > STALE_AFTER_DAYS
-    holdings_stale_days = (datetime.now().date()
-                           - datetime.strptime(HOLDINGS_ASOF, "%Y-%m-%d").date()).days
-
     if use_snapshot:
-        print(f"[valuation] Using snapshot fallback ({snap_stale_days}d old)")
-        st.warning(
-            f"⚠️ Live valuation data unavailable — showing the {SNAPSHOT_ASOF} "
-            f"snapshot ({snap_stale_days} days old"
-            f"{', STALE — qualitative context only, do not size off these' if snap_stale else ''}). "
+        print("[valuation] Using snapshot fallback")
+        st.info(
+            "ℹ️ Live valuation data unavailable — showing May 2025 estimates. "
             "Refresh to retry.",
             icon="📊"
-        )
-    elif holdings_stale_days > 365:
-        st.caption(
-            f"ℹ️ Live P/E, but holdings weights are as-of {HOLDINGS_ASOF} "
-            f"({holdings_stale_days} days old) — weighted averages drift as "
-            f"index composition changes; refresh SECTOR_HOLDINGS."
         )
 
     records = []
@@ -252,8 +216,7 @@ def fetch_valuation_data() -> pd.DataFrame:
             ttm_pe = snap.get("ttm_pe")
             fwd_pe = snap.get("fwd_pe")
             pb     = snap.get("pb")
-            method = (f"Snapshot ({SNAPSHOT_ASOF}"
-                      f"{', STALE' if snap_stale else ''})")
+            method = "Snapshot (May 2025)"
             coverage = 1.0
         else:
             vals   = _weighted_pe(ticker, holding_data)
@@ -273,9 +236,6 @@ def fetch_valuation_data() -> pd.DataFrame:
         records.append({
             "ticker":           ticker,
             "sector":           sector,
-            "source":           "snapshot" if use_snapshot else "live",
-            "stale_days":       snap_stale_days if use_snapshot else 0,
-            "stale":            snap_stale if use_snapshot else False,
             "ttm_pe":           ttm_pe,
             "fwd_pe":           fwd_pe,
             "pb":               pb,

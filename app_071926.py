@@ -1,24 +1,11 @@
 """
-Institutional Rotation Dashboard  (v6)
+Institutional Rotation Dashboard  (v5)
 ──────────────────────────────────────
-Changes v5 -> v6 (July 2026 cross-dashboard audit):
-  [CRITICAL]  Volume-methodology text corrected everywhere: the code computes
-              a 5-day avg vs prior-20-day baseline, not today-vs-20-day, and
-              no 50-day dual-confirmation tier exists. Docs now match code.
-              (Behavioral change to single-session detection deliberately NOT
-              made here — see PATCHES.md open decision.)
-  [NOTE]      valuation.py v3 adds source/stale_days/stale columns; no app
-              changes required (extra columns are additive) but signal tables
-              may optionally surface the stale badge.
-
 Changes v4 -> v5:
   [CRITICAL]  Vol spike badge in mover cards now uses per-tier threshold
               (was hardcoded 1.5x regardless of tier)
   [CRITICAL]  CAPE expander retitled/reworded -- it is weighted P/E, not true CAPE
   [CRITICAL]  Flow Score methodology note updated (now says today vs 20-day avg)
-              ^ v6 NOTE: this v5 claim was FALSE — top_movers._vol_ratio still
-                computes a 5-day avg vs prior-20-day baseline; v6 corrects the
-                UI text to describe the actual computation
   [HIGH]      Duplicate vol spike banner removed
   [HIGH]      RRG dots show directional arrows (rotation_history delta vectors)
   [HIGH]      Improving quadrant dots get pulsing highlight ring
@@ -926,7 +913,7 @@ if flow_df is not None and not flow_df.empty:
     st.caption(
         "Bubble size = Flow Score · "
         "X-axis: right = accelerating above 3M trend · "
-        "Y-axis: avg volume ratio (5d avg vs prior-20d baseline; continuous, not spike count) · "
+        "Y-axis: avg volume ratio vs 20-day baseline (continuous, not spike count) · "
         "Green = inflow · Red = outflow · Top-right = highest conviction"
     )
 
@@ -996,14 +983,9 @@ if flow_df is not None and not flow_df.empty:
         | **3** | Moderate | $50M–$200M | **2.00×** | SMH, IBB, ITA, KRE | Single large hedge fund trade = 1.5×; need 2× for confirmation |
         | **4** | Lower Liquid | <$50M/day | **3.00×** | XBI, SKYY, HACK | Retail noise spikes these 1.5–2× routinely |
 
-        **How vol_ratio is actually computed** (v6 doc correction): the last
-        **5-session average** volume vs the **prior 20-session baseline**
-        (`top_movers._vol_ratio`). An earlier note here claimed a today-vs-20-day
-        single-session comparison and a 50-day dual-confirmation tier — neither
-        exists in the code. A 5-day window smooths one-day noise but dilutes
-        single-session block spikes; if single-session detection is wanted,
-        change `_vol_ratio` in top_movers.py deliberately and re-calibrate the
-        tier thresholds — do not fix it by editing this caption.
+        **v4 volume fix:** vol_ratio now compares today's single session to the prior 20-day average
+        (previously compared a 5-day average vs 20-day — which diluted real spikes by ~80%).
+        Dual confirmation (20-day AND 50-day both breached) earns the highest signal tier.
         """)
 
 else:
@@ -1038,7 +1020,7 @@ if movers_df is not None and not movers_df.empty:
     with col_f4:
         vol_spike_only = st.toggle(
             "🔊 Vol Spike Filter", value=False, key="vol_spike_filter",
-            help="Show only ETFs whose 5-day avg volume >= tier-appropriate threshold vs prior 20-day baseline"
+            help="Show only ETFs with today's volume >= tier-appropriate threshold vs 20-day avg"
         )
 
     if top_n != 10:
@@ -1065,7 +1047,7 @@ if movers_df is not None and not movers_df.empty:
                   {spike_count} ETF{"s" if spike_count != 1 else ""} with tier-appropriate volume spike
                 </span>
                 <span style="font-size:12px;color:#6b7280;margin-left:8px">
-                  — 5-day avg volume exceeds per-ticker institutional threshold vs prior 20-day baseline
+                  — today's volume exceeds per-ticker institutional threshold vs 20-day avg
                 </span>
               </div>
             </div>""", unsafe_allow_html=True)
