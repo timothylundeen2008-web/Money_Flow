@@ -823,10 +823,9 @@ else:
 st.markdown("---")
 st.markdown("## 🌊 Sector Money Flow & Rotation")
 st.caption(
-    "Aggregate QUIET accumulation (Tier B: directional volume pressure, via "
-    "Chaikin Money Flow) across all ETF categories — NOT a measure of capital. "
-    "Loud, event-driven activity is scored separately and shown alongside, "
-    "never combined in. See the evidence-tier note in the methodology panel below."
+    "Aggregate institutional flow scores across all ETF categories. "
+    "Where capital is moving right now — derived from price momentum, "
+    "spread acceleration, and volume conviction."
 )
 
 with st.spinner("Loading sector flow data…"):
@@ -834,26 +833,18 @@ with st.spinner("Loading sector flow data…"):
 
 if flow_df is not None and not flow_df.empty:
 
-    # [v7 FIX] flow_score no longer exists (see top_movers.py v4 changelog) —
-    # this groupby was the source of the KeyError. Replaced with the two
-    # scores that replaced it. accumulation_score can be NaN for tickers with
-    # <63 bars of history; mean() skips NaN by default, which is correct here
-    # (a partial-coverage category should average over what IS measurable,
-    # not be silently zero-filled).
     agg = (flow_df.groupby("category")
            .agg(
-               avg_accum   = ("accumulation_score", "mean"),
-               avg_event   = ("event_score",         "mean"),
-               avg_spread  = ("spread",              "mean"),
-               avg_1m      = ("perf_1m",             "mean"),
-               avg_3m      = ("perf_3m",             "mean"),
-               avg_vol_r   = ("vol_ratio",           "mean"),
-               vol_spikes  = ("vol_spike",           "sum"),
-               n_scored    = ("accumulation_score",  lambda s: int(s.notna().sum())),
-               etf_count   = ("ticker",              "count"),
+               avg_flow    = ("flow_score",     "mean"),
+               avg_spread  = ("spread",         "mean"),
+               avg_1m      = ("perf_1m",        "mean"),
+               avg_3m      = ("perf_3m",        "mean"),
+               avg_vol_r   = ("vol_ratio",      "mean"),   # continuous avg vol ratio
+               vol_spikes  = ("vol_spike",      "sum"),
+               etf_count   = ("ticker",         "count"),
            )
            .reset_index()
-           .sort_values("avg_accum", ascending=False, na_position="last"))
+           .sort_values("avg_flow", ascending=False))
 
     col_flow1, col_flow2 = st.columns([3, 2])
 
@@ -861,14 +852,11 @@ if flow_df is not None and not flow_df.empty:
         st.markdown('<div class="section-label">Inflow strength by category — ranked</div>',
                     unsafe_allow_html=True)
 
-        # [v7] thresholds rescaled: accumulation_score spans roughly -100..+100
-        # (see flow_metrics.accumulation_score), not the old flow_score's ~-10..+20.
         fig_flow = go.Figure()
-        plot_agg = agg.dropna(subset=["avg_accum"])
-        for _, row in plot_agg.sort_values("avg_accum").iterrows():
-            v     = row["avg_accum"]
-            color = ("#1D9E75" if v > 40 else "#2BAD7E" if v > 15 else
-                     "#378ADD" if v > 0 else "#D85A30" if v > -15 else "#A32D2D")
+        for _, row in agg.sort_values("avg_flow").iterrows():
+            v     = row["avg_flow"]
+            color = ("#1D9E75" if v > 8 else "#2BAD7E" if v > 4 else
+                     "#378ADD" if v > 0 else "#D85A30" if v > -4 else "#A32D2D")
             spike_marker = " 🔊" if row["vol_spikes"] > 0 else ""
             fig_flow.add_trace(go.Bar(
                 x=[v],
@@ -877,13 +865,11 @@ if flow_df is not None and not flow_df.empty:
                 marker_color=color, marker_line_width=0, width=0.65,
                 hovertemplate=(
                     f"<b>{row['category']}</b><br>"
-                    f"Accumulation Score: {v:.1f}  (quiet, Tier B)<br>"
-                    f"Event Score: {row['avg_event']:.1f}  (loud, informational)<br>"
+                    f"Flow Score: {v:.1f}<br>"
                     f"Avg 1M: {fmt_pct(row['avg_1m'])}<br>"
                     f"Avg Spread: {fmt_pct(row['avg_spread'])}<br>"
                     f"Avg Vol Ratio: {row['avg_vol_r']:.2f}x<br>"
-                    f"Vol Spikes: {int(row['vol_spikes'])}/{int(row['etf_count'])} ETFs<br>"
-                    f"Scored: {int(row['n_scored'])}/{int(row['etf_count'])} (≥63 bars needed)"
+                    f"Vol Spikes: {int(row['vol_spikes'])}/{int(row['etf_count'])} ETFs"
                     f"<extra></extra>"
                 ),
                 showlegend=False,
@@ -893,42 +879,38 @@ if flow_df is not None and not flow_df.empty:
             height=360,
             margin=dict(l=10, r=20, t=10, b=30),
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            xaxis=dict(title="Aggregate Accumulation Score (quiet, Tier B)",
-                       gridcolor="rgba(255,255,255,0.06)",
+            xaxis=dict(title="Aggregate Flow Score", gridcolor="rgba(255,255,255,0.06)",
                        zeroline=False, tickfont=dict(size=10)),
             yaxis=dict(gridcolor="rgba(0,0,0,0)", tickfont=dict(size=11)),
             bargap=0.25,
         )
         st.plotly_chart(fig_flow, use_container_width=True, config={"displayModeBar": False})
-        if len(agg) != len(plot_agg):
-            st.caption(f"⚠ {len(agg)-len(plot_agg)} categor{'y has' if len(agg)-len(plot_agg)==1 else 'ies have'} "
-                       f"no ticker with ≥63 bars of history and are omitted from this chart.")
 
     with col_flow2:
         st.markdown('<div class="section-label">Flow summary</div>', unsafe_allow_html=True)
 
-        st.markdown("**💚 Top quiet accumulation**")
-        for _, r in plot_agg.head(3).iterrows():
+        st.markdown("**💚 Top inflows**")
+        for _, r in agg.head(3).iterrows():
             spikes = f" · 🔊 {int(r['vol_spikes'])} spike{'s' if r['vol_spikes']!=1 else ''}" \
                      if r["vol_spikes"] > 0 else ""
             st.markdown(f"""
             <div style="padding:6px 10px;background:rgba(29,158,117,0.1);
                  border-left:3px solid #1D9E75;border-radius:4px;margin-bottom:4px">
               <span style="font-weight:600;color:#f0f0f0">{r['category']}</span>
-              <span style="color:#1D9E75;font-size:12px;margin-left:6px">Accum {r['avg_accum']:.1f}</span>
+              <span style="color:#1D9E75;font-size:12px;margin-left:6px">Score {r['avg_flow']:.1f}</span>
               <span style="font-size:11px;color:#6b7280">{spikes}</span><br>
               <span style="font-size:11px;color:#9ca3af">
                 1M: {fmt_pct(r['avg_1m'])} · Spread: {fmt_pct(r['avg_spread'])} · Vol: {r['avg_vol_r']:.2f}x
               </span>
             </div>""", unsafe_allow_html=True)
 
-        st.markdown("**🔴 Top distribution**")
-        for _, r in plot_agg.tail(3).iterrows():
+        st.markdown("**🔴 Top outflows**")
+        for _, r in agg.tail(3).iterrows():
             st.markdown(f"""
             <div style="padding:6px 10px;background:rgba(168,45,45,0.1);
                  border-left:3px solid #A32D2D;border-radius:4px;margin-bottom:4px">
               <span style="font-weight:600;color:#f0f0f0">{r['category']}</span>
-              <span style="color:#D85A30;font-size:12px;margin-left:6px">Accum {r['avg_accum']:.1f}</span><br>
+              <span style="color:#D85A30;font-size:12px;margin-left:6px">Score {r['avg_flow']:.1f}</span><br>
               <span style="font-size:11px;color:#9ca3af">
                 1M: {fmt_pct(r['avg_1m'])} · Spread: {fmt_pct(r['avg_spread'])} · Vol: {r['avg_vol_r']:.2f}x
               </span>
@@ -949,11 +931,11 @@ if flow_df is not None and not flow_df.empty:
     )
 
     fig_bubble = go.Figure()
-    for _, row in plot_agg.iterrows():
-        v     = row["avg_accum"]
-        color = ("#1D9E75" if v > 30 else "#2BAD7E" if v > 10 else
-                 "#378ADD" if v > 0 else "#D85A30" if v > -15 else "#A32D2D")
-        size  = max(20, min(60, abs(v) * 0.5 + 20))
+    for _, row in agg.iterrows():
+        v     = row["avg_flow"]
+        color = ("#1D9E75" if v > 6 else "#2BAD7E" if v > 2 else
+                 "#378ADD" if v > 0 else "#D85A30" if v > -4 else "#A32D2D")
+        size  = max(20, min(60, abs(v) * 4 + 20))
         fig_bubble.add_trace(go.Scatter(
             x=[row["avg_spread"]],
             y=[row["avg_vol_r"]],
@@ -969,8 +951,7 @@ if flow_df is not None and not flow_df.empty:
                 f"Avg Spread: {row['avg_spread']:.2f}%<br>"
                 f"Avg Vol Ratio: {row['avg_vol_r']:.2f}x (1.0 = normal)<br>"
                 f"Vol Spikes: {int(row['vol_spikes'])}<br>"
-                f"Accumulation Score: {v:.1f} (quiet)<br>"
-                f"Event Score: {row['avg_event']:.1f} (loud)<br>"
+                f"Flow Score: {v:.1f}<br>"
                 f"Avg 1M: {fmt_pct(row['avg_1m'])}"
                 f"<extra></extra>"
             ),
@@ -981,7 +962,7 @@ if flow_df is not None and not flow_df.empty:
     fig_bubble.add_vline(x=0,   line_width=1, line_color="rgba(136,135,128,0.3)", line_dash="dot")
     fig_bubble.add_hline(y=1.0, line_width=1, line_color="rgba(136,135,128,0.3)", line_dash="dot")
 
-    max_vol = float(plot_agg["avg_vol_r"].max()) * 0.9 if not plot_agg.empty else 1.5
+    max_vol = float(agg["avg_vol_r"].max()) * 0.9
     for (label, x, y, color) in [
         ("↗ HOT MONEY",    2.5,  max_vol,  "#1D9E75"),
         ("↘ QUIET BUILD",  2.5,  0.85,     "#378ADD"),
@@ -1125,24 +1106,14 @@ if movers_df is not None and not movers_df.empty:
                        "0.5px solid rgba(255,255,255,0.08)"
         glow_style   = "box-shadow:0 0 12px rgba(29,158,117,0.2);" if vol_spike else ""
 
-        # [v7 FIX] The DUAL badge and vol_spike_both were fictional — no code
-        # anywhere in top_movers.py ever set vol_spike_both, so row.get(...,
-        # False) silently defaulted False on every single render since this
-        # UI was written. The "+13 dual-confirmation" bonus and "50-day
-        # secondary confirmation" it referenced were documentation for a
-        # feature that was never implemented. Replaced with the real
-        # event/quiet distinction that DOES exist in the code.
-        is_event  = bool(row.get("spike", False))
-        event_tag = ('<span style="font-size:9px;background:rgba(216,90,48,0.3);'
-                     'color:#FFD0B8;padding:1px 5px;border-radius:4px;margin-left:4px">'
-                     '🔊 EVENT</span>') if is_event else \
-                    ('<span style="font-size:9px;background:rgba(29,158,117,0.25);'
+        # Dual-confirm indicator
+        dual_conf = row.get("vol_spike_both", False)
+        dual_tag  = ('<span style="font-size:9px;background:rgba(29,158,117,0.3);'
                      'color:#9FE1CB;padding:1px 5px;border-radius:4px;margin-left:4px">'
-                     '🤫 QUIET</span>')
+                     '✓✓ DUAL</span>') if dual_conf else ""
 
-        accum_val = row.get("accumulation_score", float("nan"))
-        accum_display = f"{accum_val:.0f}" if pd.notna(accum_val) else "—"
-        event_val = row.get("event_score", 0.0)
+        # Rank as N of M
+        flow_score_val = float(row["flow_score"])
 
         st.markdown(f"""
         <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;
@@ -1189,7 +1160,7 @@ if movers_df is not None and not movers_df.empty:
             <div style="font-size:11px;color:#6b7280">Spread</div>
             <div style="font-size:13px;font-weight:600;color:{spread_color}">{fmt_pct(row["spread"])}</div>
             <div style="font-size:10px;color:#6b7280;margin-top:3px">
-              Vol ×{vol_r:.2f} vs 20d avg{event_tag}
+              Vol ×{vol_r:.2f} vs 20d avg{dual_tag}
             </div>
             <div style="font-size:{"12px" if vol_spike else "10px"};
                  font-weight:{"700" if vol_spike else "400"};color:{vol_color}">
@@ -1198,61 +1169,40 @@ if movers_df is not None and not movers_df.empty:
           </div>
 
           <div style="flex:0 0 65px;text-align:center">
-            <div style="font-size:9px;color:#6b7280;margin-bottom:1px">ACCUM</div>
-            <div style="font-size:17px;font-weight:700;color:{sig_fg}">{accum_display}</div>
+            <div style="font-size:9px;color:#6b7280;margin-bottom:1px">FLOW</div>
+            <div style="font-size:17px;font-weight:700;color:{sig_fg}">{flow_score_val:.0f}</div>
             <div style="font-size:9px;color:#6b7280">#{rank} of {total_movers}</div>
           </div>
 
         </div>
         """, unsafe_allow_html=True)
 
-    # [v7 — full rewrite] This expander described a "Flow Score" that no
-    # longer exists AND, independently, a "dual-confirmation" / 50-day-average
-    # feature that never existed in the first place: vol_spike_both was never
-    # set anywhere in top_movers.py, so the ✓✓ DUAL badge above could never
-    # render and the "+13 pts" bonus it describes was never in the scoring
-    # code. That claim survived a July 20, 2026 doc-correction pass that fixed
-    # an ADJACENT expander's identical false claim but missed this one — a
-    # reminder that duplicated documentation needs a single source, not a
-    # second manual fix. See flow_metrics.py for the actual, current logic.
-    with st.expander("📐 How Accumulation, Event, and Volume Spike are calculated"):
+    # [CRITICAL FIX] Flow Score methodology note updated to reflect v4 volume logic
+    with st.expander("📐 How the Flow Score & Volume Spike are calculated"):
         st.markdown("""
-        ### Two scores, never summed (see flow_metrics.py)
+        ### Institutional Flow Score
 
-        The single "Flow Score" this dashboard used through July 2026 is gone.
-        It awarded a FLAT +8 for crossing the volume-spike threshold against a
-        momentum term that only realistically spanned about ±2 — so one loud
-        session outweighed any real momentum difference roughly 4x, and
-        mediocre names with a single volume spike outranked genuinely strong
-        quiet accumulators. That's the opposite of this framework's own thesis
-        that institutions build size quietly and loud volume is more often
-        retail or event-driven. It's now split in two:
+        Combines four signals weighted by reliability:
 
-        | Score | Measures | Range | Use |
-        |---|---|---|---|
-        | **Accumulation** | QUIET, sustained directional buying pressure | ≈ -100…+100 | Rank candidates on this |
-        | **Event** | LOUD activity — something happened, go find out what | 0…100 | Informational only — never add to Accumulation |
+        | Weight | Component | What it measures |
+        |---|---|---|
+        | **40%** | Momentum consistency | Equal-weighted avg of 1W + 1M + 3M performance |
+        | **30%** | Acceleration (spread) | 1M perf minus (3M ÷ 3 monthly run-rate) — positive = accelerating |
+        | **20%** | Volume conviction | Today's session volume vs prior 20-day average |
+        | **10%** | Timeframe unity | Fraction of 1W / 1M / 3M timeframes all positive |
 
-        **Accumulation Score components** (independent, not transformations of
-        one another): CMF level (±35), persistence — % of the last 21 sessions
-        with positive CMF (±25), A/D-line-vs-price divergence (±25), and
-        quietness — credited below the tier volume threshold, PENALIZED above
-        it (±15).
-
-        **Event Score**: 40 base points for crossing the tier threshold, plus
-        up to 60 more for how far past it. Its `event_direction` field
-        (Buying / Selling / Two-sided) comes from where price closed within
-        that session's range — the money-flow multiplier — not from the
-        trailing month's sign.
+        **Bonuses:** +8 pts for single-window vol spike · +13 pts for dual-confirmation spike
+        (both 20-day AND 50-day averages breached simultaneously).
 
         ---
 
-        ### Volume Spike Detection
+        ### Volume Spike Detection (v4)
 
-        `vol_ratio` compares the **last 5-session average** volume to the
-        **prior 20-session baseline**. There is no 50-day secondary
-        confirmation and no dual-confirmation bonus — those described a
-        feature that was never implemented.
+        **Today's single session** is compared to the **prior 20-day rolling average** — NOT a
+        5-day average (that was v3, which diluted real spikes by ~80%).
+
+        Secondary confirmation uses the **50-day average**. When both are breached:
+        vol_spike_both = True → shown as ✓✓ DUAL badge → "Strong Accumulation / Distribution"
 
         **Tier-appropriate thresholds** (not a flat 1.5×):
         - Tier 1 (>$2B ADV): 1.25× — QQQ, XLK
@@ -1262,26 +1212,17 @@ if movers_df is not None and not movers_df.empty:
 
         ---
 
-        ### Signal Labels (now direction-of-volume based, not price-sign based)
+        ### Signal Labels
 
         | Signal | Criteria |
         |---|---|
-        | **Strong Accumulation** | CMF ≥ +0.10, quiet (below tier threshold) |
-        | **Accumulation** | CMF ≥ +0.05, quiet |
-        | **Buying Event** | CMF ≥ +0.10, LOUD (spike) — was mislabeled Accumulation before |
-        | **Inflow** | CMF ≥ +0.05, loud |
-        | **Neutral** | CMF between -0.05 and +0.05 |
-        | **Distribution** | CMF ≤ -0.05, quiet |
-        | **Strong Distribution** | CMF ≤ -0.10, quiet |
-        | **Selling Event** | CMF ≤ -0.10, LOUD — was mislabeled Distribution before |
-        | **Outflow** | CMF ≤ -0.05, loud |
-        | **"(px only)" suffix** | Insufficient OHLCV history (<63 bars) — direction inferred from price sign only, Tier C, not Tier B |
-
-        A heavy-volume day that closed near the session **low** is now
-        correctly labeled a Selling Event even in a month that was net
-        positive — previously it could be labeled "Accumulation" whenever the
-        trailing month happened to be green, regardless of which side that
-        session's volume was actually on.
+        | **Strong Accumulation** | Dual vol confirm + spread >1.5% + 1M positive |
+        | **Accumulation** | Single spike + spread >0% + 1M positive |
+        | **Inflow** | 1M positive + spread positive (no spike required) |
+        | **Neutral** | Mixed signals |
+        | **Outflow** | 1M negative + negative spread |
+        | **Distribution** | Single spike + 1M negative |
+        | **Strong Distribution** | Dual confirm + 1M negative + spread <-1% |
         """)
 
 else:
