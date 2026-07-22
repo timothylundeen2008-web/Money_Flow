@@ -1,31 +1,7 @@
-# VERSION: v4-20260721
+# VERSION: v3-final-20260526 — DO NOT EDIT MANUALLY
 """
-top_movers.py  (v4 — directional volume via flow_metrics)
+top_movers.py  (v3 — tiered volume thresholds + rotation flow data)
 ────────────────────────────────────────────────────────────────────
-CHANGES v3 -> v4 (July 2026 flow-detection review):
-  [CRITICAL] _flow_score REPLACED. The old composite awarded a FLAT +8 for
-             crossing the volume-spike threshold while its entire momentum
-             term spanned roughly ±2, so a single loud session outweighed any
-             realistic momentum difference ~4x. Mediocre names that printed one
-             big volume day outranked strong quiet accumulators — the exact
-             INVERSION of this framework's stated thesis that loud volume is
-             retail and institutions accumulate quietly. Three of its four
-             terms were also transformations of the same three price numbers,
-             making a two-factor blend look like a four-factor one.
-             Now split into TWO scores that are reported side by side and
-             NEVER summed, because they measure opposite phenomena:
-               accumulation_score — quiet, sustained, directional buying
-               event_score        — loud activity + which side it closed on
-  [CRITICAL] Fetches OHLCV. High/Low were downloaded and discarded; they are
-             the inputs to the money-flow multiplier, the only way to tell
-             BUYING volume from SELLING volume.
-  [CHANGED]  _signal_label now uses CMF (directional) rather than inferring
-             direction from trailing price sign. A heavy-volume day closing on
-             the LOW is now labeled distribution; previously it was labeled
-             "Accumulation" whenever the trailing month happened to be green.
-  [NOTE]     _vol_ratio is unchanged (5-day avg vs prior 20-day baseline) and
-             is still UNDIRECTED — it says how much traded, never on which
-             side. It is now a gate and a magnitude input, not a signal.
 Data-driven volume spike thresholds based on Average Daily Dollar Volume (ADDV).
 
 THRESHOLD RESEARCH (sources: ValuEngine Oct 2024, SeekingAlpha, Morpheus Trading,
@@ -129,14 +105,9 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 SIGNAL_COLORS = {
     "Strong Accumulation": ("#1D9E75", "#0d3326"),
     "Accumulation":        ("#2BAD7E", "#0e2e22"),
-    "Buying Event":        ("#4FB286", "#0d2b21"),
     "Inflow":              ("#378ADD", "#0e2240"),
     "Neutral":             ("#888780", "#1e2330"),
-    "Neutral (px only)":   ("#6E6D68", "#1a1e29"),
-    "Inflow (px only)":    ("#5E7FA8", "#131d2e"),
-    "Outflow (px only)":   ("#A86A50", "#241610"),
     "Outflow":             ("#D85A30", "#2e1810"),
-    "Selling Event":       ("#C25A3A", "#2b1510"),
     "Distribution":        ("#D04020", "#2e1208"),
     "Strong Distribution": ("#A32D2D", "#250c0c"),
 }
@@ -146,38 +117,15 @@ VOL_SPIKE_THRESHOLD = 1.5   # legacy default; per-ticker threshold now from TIER
 
 # ── Price + volume fetching ────────────────────────────────────────────────────
 
-_LAST_OHLCV = {}
-
-
 def _fetch_yfinance(tickers):
-    """
-    Download OHLCV. period bumped 130d -> 200d so the 63-bar minimum for the
-    flow metrics survives holidays and partial listings with real margin.
-    Populates _LAST_OHLCV alongside the legacy close/volume return.
-    """
-    global _LAST_OHLCV
     try:
         import yfinance as yf
-        raw = yf.download(tickers, period="200d", interval="1d",
-                          auto_adjust=True, progress=False, threads=True, timeout=30)
+        raw = yf.download(tickers, period="130d", interval="1d",
+                          auto_adjust=True, progress=False, threads=True, timeout=25)
         if raw.empty:
             return None, None
-        if isinstance(raw.columns, pd.MultiIndex):
-            lvl0 = set(raw.columns.get_level_values(0))
-            if "Close" in lvl0:
-                closes, volumes = raw["Close"], raw["Volume"]
-                _LAST_OHLCV = {tk: pd.DataFrame({
-                                  "High": raw["High"][tk], "Low": raw["Low"][tk],
-                                  "Close": raw["Close"][tk], "Volume": raw["Volume"][tk]
-                               }).dropna() for tk in closes.columns}
-            else:
-                closes = pd.DataFrame({tk: raw[tk]["Close"] for tk in lvl0})
-                volumes = pd.DataFrame({tk: raw[tk]["Volume"] for tk in lvl0})
-                _LAST_OHLCV = {tk: raw[tk][["High","Low","Close","Volume"]].dropna()
-                               for tk in lvl0}
-        else:
-            closes, volumes = raw, pd.DataFrame()
-            _LAST_OHLCV = {}
+        closes  = raw["Close"]  if isinstance(raw.columns, pd.MultiIndex) else raw
+        volumes = raw["Volume"] if isinstance(raw.columns, pd.MultiIndex) else pd.DataFrame()
         return closes, volumes
     except Exception as e:
         print(f"[top_movers/yfinance] {e}")
@@ -245,52 +193,36 @@ def _addv_usd(c, v):
 # ── Signal logic (tier-aware) ──────────────────────────────────────────────────
 
 def _signal_label(row):
-    """
-    Direction now comes from CMF (where closes land inside their ranges),
-    not from the sign of trailing price. Falls back to the legacy price-based
-    rule ONLY when CMF is unavailable, and says so via the "(px only)" suffix
-    so a Tier-C inference is never mistaken for a Tier-B measurement.
-    """
-    cmf   = row.get("cmf")
-    spike = bool(row.get("vol_spike", False))
-    quiet = not spike
+    spread    = row["perf_1m"] - (row["perf_3m"] / 3)
+    vol       = row.get("vol_ratio", 1.0)
+    perf_1m   = row["perf_1m"]
+    threshold = row.get("spike_threshold", 1.5)
+    spike     = vol >= threshold
 
-    if cmf is None or pd.isna(cmf):
-        perf_1m = row.get("perf_1m", 0)
-        spread  = row.get("spread", 0)
-        if perf_1m > 0 and spread > 0:  return "Inflow (px only)"
-        if perf_1m < 0 and spread < 0:  return "Outflow (px only)"
-        return "Neutral (px only)"
-
-    if cmf >= 0.10:
-        return "Strong Accumulation" if quiet else "Buying Event"
-    if cmf >= 0.05:
-        return "Accumulation" if quiet else "Inflow"
-    if cmf <= -0.10:
-        return "Strong Distribution" if quiet else "Selling Event"
-    if cmf <= -0.05:
-        return "Distribution" if quiet else "Outflow"
+    if spike and spread > 1.5 and perf_1m > 0: return "Strong Accumulation"
+    if spike and spread > 0   and perf_1m > 0: return "Accumulation"
+    if spike and perf_1m < 0  and spread < -1: return "Strong Distribution"
+    if spike and perf_1m < 0:                  return "Distribution"
+    if spread > 1.5 and vol > 1.1:             return "Accumulation"
+    if perf_1m > 0  and spread > 0:            return "Inflow"
+    if spread < -1.5 and vol < 0.9:            return "Distribution"
+    if perf_1m < 0  and spread < -0.5:         return "Outflow"
     return "Neutral"
 
 
-# ── Scoring ────────────────────────────────────────────────────────────────────
-# The v3 _flow_score is GONE. See the module changelog for why. Ranking now
-# uses accumulation_score from flow_metrics (quiet, directional, Tier B), with
-# event_score reported alongside and never added to it.
+# ── Flow score ─────────────────────────────────────────────────────────────────
 
-def _attach_flow_metrics(rec, ohlcv):
-    """Attach the Tier-B panel, or explicit NaNs when history is short."""
-    from flow_metrics import compute_all
-    if ohlcv is None or len(ohlcv) < 63:
-        rec.update({"cmf": np.nan, "cmf_persist": np.nan, "ad_divergence": np.nan,
-                    "mfi": np.nan, "obv_trend": np.nan,
-                    "stealth_label": "Insufficient history", "stealth_score": 0,
-                    "accumulation_score": np.nan, "event_score": 0.0,
-                    "event_direction": "None", "insufficient_history": True})
-        return rec
-    rec.update(compute_all(ohlcv, rec.get("vol_ratio", 1.0),
-                           rec.get("spike_threshold", 1.5)))
-    return rec
+def _flow_score(row):
+    perfs = [row["perf_1w"], row["perf_1m"], row["perf_3m"]]
+    if any(pd.isna(p) for p in perfs): return float("nan")
+    momentum    = float(np.mean(perfs))
+    accel       = float(row["perf_1m"] - (row["perf_3m"] / 3))
+    vol_conf    = min(float(row.get("vol_ratio", 1.0)), 3.0)
+    consistency = sum(1 for p in perfs if p > 0) / 3
+    score = (0.40*momentum + 0.30*accel*2 + 0.20*vol_conf*10 + 0.10*consistency*20)
+    if row.get("vol_spike", False):
+        score += 8.0    # bonus for crossing tier-appropriate threshold
+    return round(score, 2)
 
 
 # ── Main fetch ─────────────────────────────────────────────────────────────────
@@ -328,22 +260,19 @@ def fetch_top_movers(top_n=10):
             "perf_3m":         round(_pct(s, 63), 2),
             "vol_ratio":       vol_r,
         }
-        # momentum acceleration — renamed from "spread"; it is NOT accumulation
-        rec["momentum_accel"] = round(rec["perf_1m"] - (rec["perf_3m"] / 3), 2)
-        rec["spread"]         = rec["momentum_accel"]   # back-compat alias
-        rec["vol_spike"]      = vol_r >= threshold
-        rec = _attach_flow_metrics(rec, _LAST_OHLCV.get(ticker))
-        rec["signal"]         = _signal_label(pd.Series(rec))
+        rec["spread"]     = round(rec["perf_1m"] - (rec["perf_3m"] / 3), 2)
+        rec["vol_spike"]  = vol_r >= threshold
+        rec["flow_score"] = _flow_score(pd.Series(rec))
+        rec["signal"]     = _signal_label(pd.Series(rec))
         sc = SIGNAL_COLORS.get(rec["signal"], ("#888780", "#1e2330"))
-        rec["signal_fg"], rec["signal_bg"] = sc[0], sc[1]
+        rec["signal_fg"]  = sc[0]
+        rec["signal_bg"]  = sc[1]
         records.append(rec)
 
     if not records: return pd.DataFrame()
-    df = pd.DataFrame(records)
-    # Rank on QUIET accumulation. Names with too little history to compute a
-    # directional score are shown last rather than dropped, so their absence
-    # is visible instead of silent.
-    df = (df.sort_values("accumulation_score", ascending=False, na_position="last")
+    df = (pd.DataFrame(records)
+            .dropna(subset=["flow_score"])
+            .sort_values("flow_score", ascending=False)
             .reset_index(drop=True))
     return df.head(top_n)
 
@@ -374,10 +303,9 @@ def fetch_sector_flow_data():
             "perf_3m":  round(_pct(s, 63), 2),
             "vol_ratio": vol_r,
         }
-        rec["momentum_accel"] = round(rec["perf_1m"] - (rec["perf_3m"] / 3), 2)
-        rec["spread"]         = rec["momentum_accel"]
-        rec["vol_spike"]      = vol_r >= threshold
-        rec = _attach_flow_metrics(rec, _LAST_OHLCV.get(ticker))
+        rec["spread"]    = round(rec["perf_1m"] - (rec["perf_3m"] / 3), 2)
+        rec["vol_spike"] = vol_r >= threshold
+        rec["flow_score"]= _flow_score(pd.Series(rec))
         records.append(rec)
 
-    return pd.DataFrame(records) if records else pd.DataFrame()
+    return pd.DataFrame(records).dropna(subset=["flow_score"]) if records else pd.DataFrame()

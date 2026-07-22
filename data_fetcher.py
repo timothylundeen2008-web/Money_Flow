@@ -1,6 +1,23 @@
 """
-data_fetcher.py  (v2 – yfinance + stooq fallback)
+data_fetcher.py  (v3 – OHLCV + fail-loud lookbacks)
 ──────────────────────────────────────────────────
+CHANGES v2 -> v3 (July 2026 flow-detection review):
+  [CRITICAL] _pct_change no longer silently substitutes the oldest available
+             row when history is shorter than the requested window. It now
+             returns NaN. The old behaviour meant a ticker with 30 rows
+             produced a "perf_1y" that was really a 30-day return, with no
+             warning — and because the DEFAULT RRG view sets rs_ratio = rs_1y,
+             that silently corrupted the default quadrant map. Same silent-
+             degradation class as the Oct-2025 CPI calendar bug.
+  [NEW]      Fetches full OHLCV, not just Close. High/Low were always being
+             downloaded and discarded; they are the inputs to the real
+             Accumulation/Distribution line and Chaikin Money Flow, which is
+             the only way this dashboard can measure DIRECTIONAL volume.
+  [NEW]      Sector table carries Tier-B flow columns from flow_metrics.py.
+  [CHANGED]  period 400d -> 500d. 400 CALENDAR days is only ~275 trading rows
+             against the 253 that perf_1y needs — a ~22-session margin. The
+             stooq fallback kept 400 TRADING rows, so the two sources had
+             materially different depth for the same nominal metric.
 Computes all sector performance timeframes from actual ETF price history.
 Primary source : yfinance (Yahoo Finance) – works on Streamlit Cloud
 Fallback source: stooq.com  CSV – no API key, no rate limits
@@ -52,17 +69,19 @@ def _pct_change(series: pd.Series, days_back: int) -> float:
     Return percentage change from `days_back` trading days ago to latest close.
     Looks back up to days_back * 1.5 calendar days to account for weekends/holidays.
     """
-    if len(series) < 2:
-        return 0.0
-    recent = series.dropna()
-    if len(recent) < 2:
-        return 0.0
+    recent = series.dropna() if series is not None else pd.Series(dtype=float)
+
+    # FAIL LOUD: insufficient history returns NaN, never a truncated window.
+    # The previous max(0, ...) clamp returned the oldest available row, so a
+    # short series produced a plausible-looking number for a lookback it did
+    # not actually have.
+    if len(recent) < days_back + 1:
+        return float("nan")
+
     end_price = recent.iloc[-1]
-    # Use exact index position for speed
-    start_idx = max(0, len(recent) - days_back - 1)
-    start_price = recent.iloc[start_idx]
-    if start_price == 0:
-        return 0.0
+    start_price = recent.iloc[len(recent) - days_back - 1]
+    if start_price == 0 or pd.isna(start_price) or pd.isna(end_price):
+        return float("nan")
     return (end_price / start_price - 1) * 100
 
 
@@ -84,16 +103,29 @@ def _ytd_change(series: pd.Series) -> float:
 
 # ── Source 1: yfinance ─────────────────────────────────────────────────────────
 
+# Module-level cache of the most recent OHLCV pull, so the sector table and
+# the flow metrics are computed from THE SAME bars rather than two fetches.
+_LAST_OHLCV: dict[str, pd.DataFrame] = {}
+
+
+def get_last_ohlcv() -> dict[str, pd.DataFrame]:
+    """{ticker: DataFrame[High, Low, Close, Volume]} from the most recent fetch."""
+    return _LAST_OHLCV
+
+
 def _fetch_yfinance(tickers: list[str]) -> pd.DataFrame | None:
     """
-    Download ~400 days of daily closes via yfinance.
-    Returns wide DataFrame with tickers as columns, dates as index.
+    Download ~500 calendar days of daily OHLCV via yfinance.
+
+    Returns a wide close-price DataFrame for backward compatibility, and
+    ALSO populates _LAST_OHLCV with full High/Low/Close/Volume per ticker.
     """
+    global _LAST_OHLCV
     try:
         import yfinance as yf
         raw = yf.download(
             tickers,
-            period="400d",
+            period="500d",
             interval="1d",
             auto_adjust=True,
             progress=False,
@@ -104,9 +136,23 @@ def _fetch_yfinance(tickers: list[str]) -> pd.DataFrame | None:
             return None
         # Handle both single and multi-ticker return shapes
         if isinstance(raw.columns, pd.MultiIndex):
-            closes = raw["Close"]
+            lvl0 = set(raw.columns.get_level_values(0))
+            if "Close" in lvl0:                      # (field, ticker)
+                closes = raw["Close"]
+                ohlcv = {tk: pd.DataFrame({
+                            "High": raw["High"][tk], "Low": raw["Low"][tk],
+                            "Close": raw["Close"][tk], "Volume": raw["Volume"][tk]
+                         }).dropna()
+                         for tk in closes.columns}
+            else:                                    # (ticker, field)
+                closes = pd.DataFrame({tk: raw[tk]["Close"] for tk in lvl0})
+                ohlcv = {tk: raw[tk][["High", "Low", "Close", "Volume"]].dropna()
+                         for tk in lvl0}
         else:
             closes = raw[["Close"]].rename(columns={"Close": tickers[0]})
+            ohlcv = {tickers[0]: raw[["High", "Low", "Close", "Volume"]].dropna()}
+
+        _LAST_OHLCV = {k: v for k, v in ohlcv.items() if not v.empty}
         closes = closes.dropna(how="all")
         return closes if not closes.empty else None
     except Exception as e:
@@ -131,7 +177,7 @@ def _fetch_stooq_single(ticker: str) -> pd.Series | None:
             return None
         s = df["Close"].dropna()
         # Keep last 400 trading days
-        return s.iloc[-400:] if len(s) > 400 else s
+        return s.iloc[-500:] if len(s) > 500 else s
     except Exception as e:
         print(f"[stooq] {ticker}: {e}")
         return None
@@ -174,10 +220,13 @@ def _build_sector_df(prices: pd.DataFrame) -> pd.DataFrame:
             continue
         s = prices[ticker].dropna()
         if len(s) < 10:
+            print(f"[data_fetcher] {ticker}: only {len(s)} bars — SKIPPED")
             continue
-        records.append({
+
+        rec = {
             "sector":   sector_name,
             "ticker":   ticker,
+            "bars":     len(s),
             "perf_1d":  _pct_change(s, 1),
             "perf_1w":  _pct_change(s, 5),
             "perf_1m":  _pct_change(s, 21),
@@ -185,15 +234,49 @@ def _build_sector_df(prices: pd.DataFrame) -> pd.DataFrame:
             "perf_6m":  _pct_change(s, 126),
             "perf_1y":  _pct_change(s, 252),
             "perf_ytd": _ytd_change(s),
-        })
+        }
+
+        # Surface degraded lookbacks instead of letting a NaN quietly propagate
+        # into rs_ratio / rs_momentum and out to the quadrant map.
+        degraded = [k for k in ("perf_1w","perf_1m","perf_3m","perf_6m","perf_1y")
+                    if pd.isna(rec[k])]
+        rec["degraded_lookbacks"] = ",".join(degraded)
+        rec["data_complete"] = not degraded
+        if degraded:
+            print(f"[data_fetcher] {ticker}: insufficient history for {degraded} "
+                  f"({len(s)} bars) — reported as NaN, NOT substituted")
+
+        # ── Tier-B directional volume (needs OHLCV from the same fetch) ──
+        ohlcv = _LAST_OHLCV.get(ticker)
+        if ohlcv is not None and len(ohlcv) >= 63:
+            try:
+                from flow_metrics import compute_all
+                vol = ohlcv["Volume"].dropna()
+                vr = (float(vol.iloc[-5:].mean() / vol.iloc[-25:-5].mean())
+                      if len(vol) >= 25 and vol.iloc[-25:-5].mean() else 1.0)
+                rec["vol_ratio"] = round(vr, 2)
+                rec.update({k: v for k, v in compute_all(ohlcv, vr, 1.50).items()
+                            if k in ("cmf", "cmf_persist", "ad_divergence", "mfi",
+                                     "obv_trend", "stealth_label", "stealth_score",
+                                     "accumulation_score", "event_score",
+                                     "event_direction", "spike")})
+            except Exception as e:
+                print(f"[data_fetcher] flow metrics failed for {ticker}: {e}")
+
+        records.append(rec)
 
     if not records:
         return pd.DataFrame()
 
     df = pd.DataFrame(records)
-    # Round to 2dp for display
     perf_cols = ["perf_1d","perf_1w","perf_1m","perf_3m","perf_6m","perf_1y","perf_ytd"]
     df[perf_cols] = df[perf_cols].round(2)
+
+    incomplete = df.loc[~df.get("data_complete", True), "ticker"].tolist() \
+        if "data_complete" in df.columns else []
+    if incomplete:
+        print(f"[data_fetcher] ⚠ degraded lookbacks for: {incomplete} — "
+              f"quadrant assignments for these sectors are unreliable")
     return df
 
 
