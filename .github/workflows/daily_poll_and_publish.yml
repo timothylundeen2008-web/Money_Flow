@@ -1,0 +1,124 @@
+name: Daily Poll & Publish
+
+# ── WHY THIS COMBINED WORKFLOW, AND WHY IT LIVES HERE ─────────────────────────
+# This replaces a misplaced version of the ETF-poll job that was written into
+# the All-Weather repo's workflow. It called `from etf_flow_tracker import
+# snapshot_all`, but etf_flow_tracker.py only exists HERE, in the Rotation
+# repo — that workflow would have failed with ModuleNotFoundError on its first
+# run. Fixed by moving the job to the repo the module actually lives in.
+#
+# Two jobs, in order, in one workflow:
+#   1. Poll ETF shares outstanding (etf_flow_tracker.snapshot_all) — commits
+#      directly via git, since the Action already has a full repo checkout.
+#      This data CANNOT be backfilled: free sources expose shares outstanding
+#      only as a current snapshot, so a missed day is lost forever.
+#   2. Publish the full signal summary (publish_to_checklist.py) — sector
+#      flow scores, ETF creation/redemption divergence, COT positioning,
+#      constituent breadth — to the shared repo the All-Weather checklist
+#      reads via rotation_bridge. Runs AFTER the poll so flow_vs_price_
+#      divergence() sees today's snapshot, not yesterday's.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    # 21:45 UTC = 4:45pm ET, ~45 min after the close — after the All-Weather
+    # repo's own 21:30 UTC poll (if both are active), so cross-checks have
+    # same-day data on both sides.
+    - cron: "45 21 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rotation-daily
+  cancel-in-progress: false
+
+jobs:
+  poll_and_publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas numpy requests streamlit
+
+      - name: Verify publish target is configured
+        env:
+          GITHUB_REPO: ${{ secrets.PUBLISH_REPO }}
+        run: |
+          if [ -z "$GITHUB_REPO" ]; then
+            echo "::warning::PUBLISH_REPO secret is not set. The poll will still "
+            echo "run and commit locally, but publish_to_checklist.py will write "
+            echo "to a NON-durable backend and the All-Weather checklist will not "
+            echo "see it. Set PUBLISH_TOKEN and PUBLISH_REPO in this repo's "
+            echo "Actions secrets — see ROTATION_DEPLOYMENT.md."
+          fi
+
+      - name: Poll ETF shares outstanding
+        env:
+          ETF_FLOW_STORE: data/etf_shares_history.csv
+          # No GITHUB_TOKEN/GITHUB_REPO here on purpose — this step commits via
+          # plain `git push`, authenticated by actions/checkout's own built-in
+          # credentials (scoped to THIS repo only). It must never see the
+          # cross-repo PUBLISH_* alias below; that's for the publish step only.
+        run: |
+          python - <<'PY'
+          import sys, traceback
+          sys.path.insert(0, ".")
+          try:
+              from etf_flow_tracker import snapshot_all, coverage_report
+              snapshot_all()
+              print("coverage:", coverage_report().get("message"))
+          except Exception:
+              traceback.print_exc()
+              print("::warning::ETF poll failed; see traceback. Publish step "
+                    "still runs on whatever history already exists.")
+          PY
+
+      - name: Commit ETF poll data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- data/; then
+            echo "No new poll data — skipping commit."
+          else
+            git add data/
+            git commit -m "data: rotation ETF shares snapshot $(date -u +%Y-%m-%d)"
+            git pull --rebase --autostash origin ${{ github.ref_name }} || true
+            git push
+          fi
+
+      - name: Publish signal summary to checklist bridge
+        env:
+          # storage_backend.py reads these EXACT names via os.environ. Aliased
+          # here, scoped to only this step, from the PUBLISH_* secrets — so the
+          # reserved name GITHUB_TOKEN never appears anywhere else in this
+          # workflow (the checkout/push steps use actions/checkout's own
+          # credentials, untouched).
+          GITHUB_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+          GITHUB_REPO: ${{ secrets.PUBLISH_REPO }}
+          GITHUB_BRANCH: ${{ secrets.PUBLISH_BRANCH || 'main' }}
+          DATA_DIR: data
+        run: |
+          python publish_to_checklist.py
+          rc=$?
+          if [ $rc -eq 0 ]; then
+            echo "Published durably."
+          elif [ $rc -eq 2 ]; then
+            echo "::warning::Published, but NOT durably (PUBLISH_TOKEN/PUBLISH_REPO "
+            echo "missing or misconfigured) — treating as a warning, not a failure, "
+            echo "so the poll commit above still lands. Fix the secrets so the next "
+            echo "run is durable."
+          else
+            echo "::error::Publish failed outright (exit $rc) — the checklist will "
+            echo "see stale or no rotation data. Check the traceback above."
+            exit 1
+          fi
