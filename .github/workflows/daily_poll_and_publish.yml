@@ -108,11 +108,21 @@ jobs:
           GITHUB_BRANCH: ${{ secrets.PUBLISH_BRANCH || 'main' }}
           DATA_DIR: data
         run: |
-          python publish_to_checklist.py
-          rc=$?
-          if [ $rc -eq 0 ]; then
+          # GitHub Actions runs multi-line `run:` blocks under `bash -e`
+          # (errexit) by default. That means the line `python
+          # publish_to_checklist.py` returning ANY non-zero code — including
+          # our own intentional exit-2 "published but not durable" signal —
+          # would abort this step immediately, before a plain `rc=$?` on the
+          # next line ever executed. The exit-code handling below was
+          # unreachable dead code as a result. `|| rc=$?` is the correct bash
+          # idiom here: putting the command on the left of `||` makes it part
+          # of a checked construct, so errexit does NOT fire, and the actual
+          # exit code is still captured on the right.
+          python publish_to_checklist.py || rc=$?
+          rc=${rc:-0}
+          if [ "$rc" -eq 0 ]; then
             echo "Published durably."
-          elif [ $rc -eq 2 ]; then
+          elif [ "$rc" -eq 2 ]; then
             echo "::warning::Published, but NOT durably (PUBLISH_TOKEN/PUBLISH_REPO "
             echo "missing or misconfigured) — treating as a warning, not a failure, "
             echo "so the poll commit above still lands. Fix the secrets so the next "
