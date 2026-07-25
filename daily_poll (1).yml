@@ -1,0 +1,36 @@
+name: Daily Data Poll (MOVED — see below)
+
+# ⚠️ CORRECTION, July 2026: this workflow was misplaced.
+#
+# It called `from etf_flow_tracker import snapshot_all`, but etf_flow_tracker.py
+# was never part of this repo — it lives in the Rotation dashboard repo, which
+# is where all ETF-flow logic actually resides. Left as-written, this job would
+# have failed with ModuleNotFoundError on its first scheduled run.
+#
+# The corrected version — which ALSO publishes the full signal summary
+# (sector flow, COT positioning, constituent breadth) that this checklist
+# reads via rotation_bridge — now lives in the Rotation repo as:
+#
+#     .github/workflows/daily_poll_and_publish.yml
+#
+# That is the workflow to enable. This file is kept only so the mistake and
+# its correction are visible in this repo's history; it intentionally does
+# nothing.
+#
+# If you specifically want THIS repo (All-Weather) to poll something on a
+# schedule in the future — e.g. once a position ledger has its own daily
+# maintenance needs — this is the right shape to copy. For now, there is
+# nothing in this repo that needs a scheduled job.
+
+on:
+  workflow_dispatch:        # manual-only; the schedule below is disabled
+
+jobs:
+  moved_notice:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain the move
+        run: |
+          echo "::notice::This workflow was moved to the Rotation repo as"
+          echo "::notice::.github/workflows/daily_poll_and_publish.yml — see"
+          echo "::notice::this file's header comment for why. Nothing to do here."

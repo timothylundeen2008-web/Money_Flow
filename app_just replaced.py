@@ -179,37 +179,6 @@ with col_refresh:
         st.cache_data.clear()
         st.rerun()
 
-with st.expander("📤 Publish to All-Weather checklist", expanded=False):
-    st.caption(
-        "Pushes sector flow scores, ETF creation/redemption divergence, COT "
-        "positioning, and constituent breadth to the shared bridge the "
-        "All-Weather checklist reads. Runs automatically once a day via "
-        "GitHub Action — use this button for an on-demand refresh before a "
-        "weekly review."
-    )
-    try:
-        import storage_backend as _sb
-        _st = _sb.backend_status()
-        (st.success if _st["durable"] else st.warning)(
-            f"Storage: {_st['backend']} — {_st['detail']}")
-    except Exception as _e:
-        st.caption(f"storage_backend unavailable ({_e})")
-
-    if st.button("📤 Publish now", key="publish_now"):
-        with st.spinner("Computing and publishing…"):
-            try:
-                import publish_to_checklist as _pub
-                rc = _pub.main()
-                if rc == 0:
-                    st.success("Published — durable and current.")
-                elif rc == 2:
-                    st.warning("Published to this session only (not durable). "
-                              "Set GITHUB_TOKEN/GITHUB_REPO in secrets to persist.")
-                else:
-                    st.error("Publish failed — see server logs for the traceback.")
-            except Exception as _e:
-                st.error(f"Publish failed: {_e}")
-
 st.divider()
 
 # ── KPI metric cards ───────────────────────────────────────────────────────────
