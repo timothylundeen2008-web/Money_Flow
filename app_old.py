@@ -234,54 +234,6 @@ with st.expander("📤 Publish to All-Weather checklist", expanded=False):
 
 st.divider()
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  DATA INTEGRITY + COVERAGE — rendered FIRST, before any panel
-# ─────────────────────────────────────────────────────────────────────────────
-# Placed at the very top because every flow reading below depends on it, and
-# because the failure this catches is SILENT: with a broken or empty flow
-# store, the panels render zeros, and zeros read as "no institutional flows
-# detected" rather than "no usable data exists". Those two states demand
-# opposite actions — one is a market observation, the other a broken pipeline.
-#
-# As of 2026-08-07 the store held 2 sessions in which prices moved for 20/20
-# tickers while shares outstanding moved for 0/20, because yfinance does not
-# expose shares outstanding as a daily series. Left unflagged, that would have
-# accumulated into 20 sessions of fabricated zeros that coverage_report()
-# would then have certified as ready=True.
-_flow_state = None
-_flow_integrity = None
-with st.expander("🔍 Data integrity & coverage — read before the panels below",
-                 expanded=True):
-    try:
-        import flow_integrity as _fi
-        _flow_integrity = _fi.render(st)
-    except Exception as _e:
-        st.warning(f"Integrity check unavailable: {_e}")
-    try:
-        import flow_coverage_banner as _fcb
-        _flow_state = _fcb.render(st)
-    except Exception as _e:
-        st.warning(f"Coverage banner unavailable: {_e}")
-
-
-def _tier_a_readable() -> bool:
-    """
-    True only when the ETF capital layer is BOTH populated AND trustworthy.
-
-    Two independent gates, deliberately ANDed:
-      * flow_integrity  — does shares_outstanding actually MOVE?  (is it real)
-      * coverage_banner — are there >= 20 sessions?               (is it enough)
-    Passing coverage while failing integrity is precisely the dangerous state:
-    plenty of rows, all of them fabricated zeros.
-    """
-    if _flow_integrity is not None and _flow_integrity.get("status") != "OK":
-        return False
-    if _flow_state is not None and _flow_state.get("etf", {}).get("status") \
-            not in ("READY", "PARTIAL"):
-        return False
-    return _flow_integrity is not None and _flow_state is not None
-
-
 # ── KPI metric cards ───────────────────────────────────────────────────────────
 st.markdown('<div class="section-label">Market rotation overview</div>', unsafe_allow_html=True)
 
@@ -930,21 +882,6 @@ st.caption(
     "never combined in. See the evidence-tier note in the methodology panel below."
 )
 
-# This section is Tier B (pressure, from price+volume), so it stays readable
-# even when the Tier A capital layer is dark — CMF and A/D compute on demand
-# and need no accumulated history. The banner exists to stop the reader
-# treating pressure as though it were capital, which is the exact conflation
-# the framework's "price + volume != flow" principle warns against.
-if not _tier_a_readable():
-    st.info(
-        "**Tier B only.** The Tier A capital layer (ETF creations/redemptions) "
-        "is not readable — see the integrity panel at the top. Everything in "
-        "this section is derived from price and volume, which measures "
-        "PRESSURE, not money: two investors trading with each other move price "
-        "and print volume while creating zero new shares. Read directionally, "
-        "and lead with COT positioning until Tier A is restored."
-    )
-
 with st.spinner("Loading sector flow data…"):
     flow_df = fetch_sector_flow_data()
 
@@ -1152,20 +1089,6 @@ st.caption(
     "Sub-sector ETFs ranked by Institutional Flow Score · "
     "Volume spike uses per-ticker tier thresholds (not a flat 1.5×)"
 )
-
-# This heading asks a Tier A question ("where's the money") while the
-# Institutional Flow Score is computed from Tier B inputs. When the capital
-# layer is dark that gap must be stated, or the title itself implies a capital
-# measurement the data cannot support.
-if not _tier_a_readable():
-    st.warning(
-        "⚠ **The capital layer is dark — this ranking cannot literally answer "
-        "\"where's the money\".** The Institutional Flow Score below is built "
-        "from directional volume pressure and relative strength, not from ETF "
-        "creations/redemptions. It is a useful screen for *candidates*; it is "
-        "not evidence that dollars moved. Confirm against COT percentiles "
-        "before sizing anything."
-    )
 
 with st.spinner("Loading ETF flow data…"):
     movers_df = fetch_top_movers(top_n=10)
