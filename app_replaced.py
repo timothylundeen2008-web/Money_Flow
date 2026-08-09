@@ -131,17 +131,6 @@ DIRECTION_ARROWS = {
     "Stable":        "→",
 }
 
-def _et_date_str() -> str:
-    """ET trading date for filenames. datetime.now() returns SERVER-local time
-    (UTC on Streamlit Cloud), so an export made after 8pm ET was previously
-    stamped with the NEXT day's date."""
-    try:
-        import market_time as _mt
-        return _mt.et_date().strftime('%Y%m%d')
-    except Exception:
-        return datetime.now().strftime('%Y%m%d')
-
-
 def perf_color(v: float) -> tuple:
     if v >  8: return "#085041", "#9FE1CB"
     if v >  4: return "#1D9E75", "#04342C"
@@ -180,20 +169,9 @@ col_title, col_refresh = st.columns([5, 1])
 with col_title:
     st.markdown("## 📊 Institutional Rotation Dashboard")
     cache_age   = get_cache_age_minutes()
-    # ET with an explicit zone label. datetime.now() returns SERVER-local time
-    # (UTC on Streamlit Cloud), so this header previously reported a "last
-    # updated" 4-5 hours off from what a US reader assumed.
-    try:
-        import market_time as _mt
-        last_update = _mt.now_et() - timedelta(minutes=cache_age)
-        _stamp = _mt.fmt_et(last_update)
-        _status = f" · {_mt.market_status()['status']}"
-    except Exception:
-        last_update = datetime.now() - timedelta(minutes=cache_age)
-        _stamp = last_update.strftime('%b %d, %Y %H:%M')
-        _status = ""
+    last_update = datetime.now() - timedelta(minutes=cache_age)
     st.caption(
-        f"Data via yfinance · Last updated {_stamp}{_status} "
+        f"Data via yfinance · Last updated {last_update.strftime('%b %d, %Y %H:%M')} "
         f"· Refreshes every 60 min · v5"
     )
 with col_refresh:
@@ -681,7 +659,7 @@ with st.expander("📋 Raw data table"):
     st.download_button(
         "⬇ Download CSV",
         df[display_cols].to_csv(index=False),
-        file_name=f"rotation_{_et_date_str()}.csv",
+        file_name=f"rotation_{datetime.now().strftime('%Y%m%d')}.csv",
         mime="text/csv",
     )
 
