@@ -72,125 +72,42 @@ IMPLAUSIBLE_DAILY_FLOW_PCT = 0.15
 
 # ── Snapshot acquisition ──────────────────────────────────────────────────────
 
-# ── Shares-outstanding sources ────────────────────────────────────────────────
-#
-# ⚠ CRITICAL, 2026-08-09. yfinance is NOT a valid source for this field.
-#
-# Empirical proof from this repo's own store: across sessions 2026-08-05 and
-# 2026-08-07, prices changed for 20/20 tracked tickers while shares
-# outstanding changed for 0/20 — including QQQ, XLF (883M shares) and GLD.
-# The chance that no creation or redemption occurred across twenty major ETFs
-# over two sessions is effectively nil.
-#
-# Cause: yfinance sources this from Yahoo's quote summary, which has never
-# exposed shares outstanding at better than annual granularity. The module's
-# founding assumption — that daily deltas back out creations/redemptions — is
-# simply false for that source.
-#
-# Consequence if left unfixed: the store accumulates 20 sessions of
-# d_shares == 0, every flow panel renders zeros, zeros read as "no
-# institutional flows detected", and coverage_report() flips to ready=True
-# and CERTIFIES the garbage. flow_integrity.py exists to stop exactly that.
-#
-# ⚠ THE ALTERNATIVES BELOW ARE UNVERIFIED. They were written without live
-# network access to the endpoints. Run flow_integrity.check_shares_move()
-# after two sessions with any new source before trusting a single reading.
-#
-# Recommended replacement, in order:
-#   1. ETF Global "ETF Daily Fund Flows – US Listed" (AWS Marketplace, FREE,
-#      point-in-time, 2017→present, carries shares outstanding, NAV AND net
-#      daily flow directly — no differencing required, and 9 years of history
-#      instead of a 20-session wait). Strictly the best option.
-#   2. Issuer sites. SSGA (XL* funds) and iShares publish daily shares
-#      outstanding per fund as CSV/JSON.
-#   3. Nasdaq / stockanalysis.com ETF pages.
-#
-SHARES_SOURCES = ("issuer", "yfinance")   # yfinance retained only as last resort
-
-
-def _shares_from_issuer(ticker: str) -> float | None:
+def _snapshot_one(ticker: str) -> dict | None:
     """
-    Daily shares outstanding from the issuer's own published file.
+    Current shares outstanding + price for one ETF.
 
-    ⚠ UNVERIFIED SCAFFOLD — endpoints were not reachable when this was
-    written. Fill in the issuer URL/parser for the funds you track, confirm
-    with flow_integrity.check_shares_move(), and only then move "issuer"
-    ahead of "yfinance" in SHARES_SOURCES for production use.
-
-    Returns None on any failure. NEVER returns a guess: a missing snapshot
-    must create a visible gap, never a fabricated data point.
-    """
-    return None
-
-
-def _shares_from_yfinance(ticker: str):
-    """
-    LAST RESORT. Known to return a static, non-daily value — see the block
-    comment above. Retained so the poll still records SOMETHING (and so the
-    price leg keeps working), but flow_integrity will correctly mark a store
-    built on this as BROKEN.
+    Tries fast_info first (cheap, stable), then .info. Returns None rather
+    than a guess when shares outstanding is unavailable — a missing snapshot
+    must create a gap, never a fabricated data point.
     """
     try:
         import yfinance as yf
     except ImportError:
-        return None, None
+        return None
+
     try:
         t = yf.Ticker(ticker)
         shares = price = None
+
         try:
             fi = t.fast_info
             shares = getattr(fi, "shares", None) or fi.get("shares")           # type: ignore
             price = getattr(fi, "last_price", None) or fi.get("lastPrice")     # type: ignore
         except Exception:
             pass
+
         if not shares or not price:
             info = t.info or {}
             shares = shares or info.get("sharesOutstanding")
             price = price or info.get("navPrice") or info.get("previousClose")
-        return shares, price
+
+        if not shares or not price:
+            return None
+        return {"date": datetime.now().date().isoformat(), "ticker": ticker,
+                "shares_outstanding": float(shares), "price": float(price)}
     except Exception as e:
         print(f"[etf_flow] {ticker}: {type(e).__name__}: {e}")
-        return None, None
-
-
-def _snapshot_one(ticker: str) -> dict | None:
-    """
-    Current shares outstanding + price for one ETF, trying each configured
-    source in SHARES_SOURCES order.
-
-    Records `shares_source` so a store can be audited later for WHICH source
-    produced each row — essential when migrating sources mid-history, since
-    a splice between a static source and a live one would otherwise look like
-    one enormous creation event.
-
-    Returns None rather than a guess when shares outstanding is unavailable.
-    """
-    shares = price = None
-    used = None
-
-    for src in SHARES_SOURCES:
-        if src == "issuer":
-            s = _shares_from_issuer(ticker)
-            if s:
-                shares, used = s, "issuer"
-        elif src == "yfinance":
-            s, p = _shares_from_yfinance(ticker)
-            price = price or p
-            if s and shares is None:
-                shares, used = s, "yfinance"
-        if shares and price:
-            break
-
-    # Price can always fall back to yfinance — the price leg is reliable even
-    # though the shares leg is not.
-    if not price:
-        _, price = _shares_from_yfinance(ticker)
-
-    if not shares or not price:
         return None
-    return {"date": datetime.now().date().isoformat(), "ticker": ticker,
-            "shares_outstanding": float(shares), "price": float(price),
-            "shares_source": used or "unknown"}
 
 
 def snapshot_all(tickers: list[str] | None = None,
