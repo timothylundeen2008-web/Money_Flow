@@ -42,7 +42,7 @@ DASHBOARDS = {
     "money_flow": {
         "name": "Institutional Money Flow",
         "icon": "💧",
-        "url": "https://moneyflow-p893texzgslivee8jg7djb.streamlit.app",
+        "url": "https://texzgslivee8jg7djb.streamlit.app",
         "role": "Evidence — where capital is actually moving",
         "order": 1,
     },
@@ -56,7 +56,7 @@ DASHBOARDS = {
     "all_weather": {
         "name": "All-Weather Portfolio",
         "icon": "🧭",
-        "url": "https://portfolio-tracker-bvou6bvseejz4gygmlcm9y.streamlit.app",
+        "url": "https://seejz4gygmlcm9y.streamlit.app",
         "role": "Action — current state and suggested changes",
         "order": 3,
     },
