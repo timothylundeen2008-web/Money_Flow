@@ -62,18 +62,6 @@ from datetime import datetime
 
 import market_time as mt
 
-# Manual macro/valuation flags — same set, same "why", as checklist_tab.py
-# and app.py. Kept in sync by hand; review dates whenever the underlying
-# facts change. CAPE and concentration specifically arm the goldilocks
-# valuation guard — without them it fails open silently, which is exactly
-# how a scheduled run could log a goldilocks regime through a stretch where
-# CAPE was already above the guard's own 40.0 block level.
-FED_BS_EXPANDING = True
-DEFICIT_GT_5PCT_GDP = True
-CAPE_CURRENT = 42.0                  # multpl.com, 2026-08-10
-TOP20_CONCENTRATION_PCT = 50.8       # JPMorgan, cited 2026-08-07 review
-MACRO_FLAGS_REVIEWED = "2026-08-13"
-
 DAILY_CSV = "logs/daily_log.csv"
 WEEKLY_CSV = "logs/weekly_log.csv"
 SUMMARY_DIR = "logs/summaries"
@@ -124,20 +112,7 @@ def run_daily(fred_key: str = "", force: bool = False) -> dict:
 
     # Step 0 — coverage gate. Runs FIRST: every flow reading depends on it.
     def _coverage():
-        # flow_integrity.py audits the ETF creations/redemptions store, which
-        # only exists in the Money_Flow repo. Running this logger from
-        # Portfolio-Tracker or the Repression repo, the module is correctly
-        # absent — that used to surface as a raw ModuleNotFoundError in the
-        # errors field, which read like a bug rather than an expected,
-        # repo-specific gap. Distinguish the two explicitly so a future log
-        # review doesn't chase a non-issue.
-        try:
-            import flow_integrity as fi
-        except ImportError:
-            return {"flow_status": "N/A",
-                    "flow_detail": "flow_integrity not applicable in this "
-                                   "repo (ETF flow data lives in Money_Flow "
-                                   "only)."}
+        import flow_integrity as fi
         rep = fi.full_report()
         return {"flow_status": rep["status"],
                 "flow_detail": rep["shares_movement"]["detail"],
@@ -150,10 +125,8 @@ def run_daily(fred_key: str = "", force: bool = False) -> dict:
         import regime_classifier as rc
         from fred_client import fetch_fred
         out = rc.full_assessment(fred_key, fetch_fred=fetch_fred,
-                                 fed_bs_expanding=FED_BS_EXPANDING,
-                                 deficit_gt_5pct_gdp=DEFICIT_GT_5PCT_GDP,
-                                 cape=CAPE_CURRENT,
-                                 top20_concentration_pct=TOP20_CONCENTRATION_PCT)
+                                 fed_bs_expanding=True,
+                                 deficit_gt_5pct_gdp=True)
         sig, reg = out["signals"], out["regime"]
         sc, km = out["repression"], out["kmlm"]
         return {
@@ -166,9 +139,7 @@ def run_daily(fred_key: str = "", force: bool = False) -> dict:
             "hy_oas": _get(sig, "hy_oas"),
             "hy_oas_mom_2w": _get(sig, "hy_oas_mom_2w"),
             "breakeven_10y": _get(sig, "breakeven_10y"),
-            "cpi_yoy": _get(sig, "cpi_yoy"),           # NSA, 12mo — feeds short_real_rate
-            "cpi_3m_saar": _get(sig, "cpi_3m_saar"),    # SA, 3mo annualized — leading
-            "cpi_mom_sa": _get(sig, "cpi_mom_sa"),      # SA, latest month
+            "cpi_yoy": _get(sig, "cpi_yoy"),
             "stock_bond_corr_60d": _get(sig, "stock_bond_corr_60d"),
             "repression_score": _get(sc, "score"),
             "repression_band": _get(sc, "band"),
@@ -194,40 +165,10 @@ def run_daily(fred_key: str = "", force: bool = False) -> dict:
         return {"gold_gate": "PASS" if ok else "FAIL"}
     row.update(_try(_gold, "Step 3 gold gate", errors) or {})
 
-    # Broad market context — what the framework's own signals are silent
-    # about. Kept separate from the regime block so a price-fetch failure
-    # cannot lose the macro capture.
-    def _context():
-        import market_context as mc
-        ctx = mc.snapshot()
-        spy = ctx.get("indices", {}).get("SPY", {})
-        qqq = ctx.get("indices", {}).get("QQQ", {})
-        return {"_ctx": ctx,
-                "spy_1d": spy.get("d1"), "spy_1w": spy.get("d5"),
-                "qqq_1d": qqq.get("d1"), "qqq_1w": qqq.get("d5"),
-                "sector_dispersion_1w": ctx.get("sector_dispersion_1w"),
-                "breadth_divergence_1w": ctx.get("breadth_divergence_1w")}
-    row.update(_try(_context, "Market context", errors) or {})
-
-    # Exception alerts. An EMPTY list is the normal, expected outcome — the
-    # daily job is not meant to produce narrative, only to surface a
-    # pre-committed threshold crossing. See market_context.alerts().
-    def _alerts():
-        import market_context as mc
-        fired = mc.alerts(row.get("_ctx") or {}, row)
-        return {"alerts_fired": len(fired),
-                "alert_max_level": (fired[0]["level"] if fired else "NONE"),
-                "alert_rules": ";".join(a["rule"] for a in fired),
-                "_alerts": fired}
-    row.update(_try(_alerts, "Alerts", errors) or {})
-
     row["errors"] = " || ".join(errors) if errors else ""
     row["error_count"] = len(errors)
 
-    # Private keys (leading underscore) are for the summary writer only and
-    # must not bloat the CSV history.
-    _csv_row = {k: v for k, v in row.items() if not k.startswith("_")}
-    _append_csv(DAILY_CSV, _csv_row, key="et_date")
+    _append_csv(DAILY_CSV, row, key="et_date")
     _write_summary(row, kind="daily")
     return row
 
@@ -311,35 +252,13 @@ def _fmt(v, suffix="%", dp=2):
 
 
 def _write_summary(row: dict, kind: str):
-    """
-    Write the human-readable analysis alongside the CSV row, plus a small
-    JSON sidecar recording WHEN this run actually happened.
-
-    Why the sidecar exists: the scheduled workflow's gate step decides
-    whether to run again by checking "does today's report already exist" —
-    but a bare file-existence check can't tell a proper 6:30pm end-of-day
-    capture apart from an ad-hoc manual test run at, say, 12:35pm testing an
-    unrelated code fix. On 2026-08-13 exactly that happened: a mid-day
-    manual verification run wrote a report, the gate saw it and concluded
-    "already done today," and the REAL 6:30pm scheduled run silently stood
-    down for the rest of the day -- with no crash, no error, just nothing.
-    The sidecar's et_hour lets the gate distinguish "a report exists" from
-    "a report exists from within the proper window," so an early manual test
-    can no longer suppress the evening capture.
-    """
+    """Write the human-readable analysis alongside the CSV row."""
     os.makedirs(SUMMARY_DIR, exist_ok=True)
     d = row.get("et_date", mt.et_date().isoformat())
     path = os.path.join(SUMMARY_DIR, f"{d}_{kind}.md")
     with open(path, "w", encoding="utf-8") as f:
         f.write(build_summary(row, kind))
     print(f"[auto_log] wrote {path}")
-
-    meta_path = os.path.join(SUMMARY_DIR, f"{d}_{kind}.meta.json")
-    now = mt.now_et()
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump({"et_date": d, "et_hour": now.hour,
-                  "run_et": mt.fmt_et(now)}, f)
-    print(f"[auto_log] wrote {meta_path}")
 
 
 def build_summary(row: dict, kind: str = "daily") -> str:
@@ -386,30 +305,11 @@ def build_summary(row: dict, kind: str = "daily") -> str:
     L.append(f"| 2s10s | {_fmt(row.get('spread_2s10s'))} |")
     L.append(f"| HY OAS | {_fmt(row.get('hy_oas'))} |")
     L.append(f"| VIX | {row.get('vix','n/a')} |")
-    L.append(f"| CPI YoY (NSA) | {_fmt(row.get('cpi_yoy'))} |")
-    L.append(f"| CPI 3M SAAR | {_fmt(row.get('cpi_3m_saar'))} |")
-    L.append(f"| CPI MoM (SA) | {_fmt(row.get('cpi_mom_sa'), dp=2)} |")
+    L.append(f"| CPI YoY | {_fmt(row.get('cpi_yoy'))} |")
     L.append(f"| Stock/bond 60d corr | {_fmt(row.get('stock_bond_corr_60d'),'',2)} |")
     L.append(f"| Gold gate | {row.get('gold_gate','n/a')} |")
     L.append(f"| KMLM stance | {row.get('kmlm_stance','n/a')} |")
     L.append("")
-
-    # Daily = EXCEPTION report. Weekly = full narrative. This split is
-    # deliberate: Checklist v4 makes daily observation and weekly decision,
-    # and a daily essay manufactures significance on days that contain none.
-    if kind == "daily":
-        try:
-            import market_context as mc
-            L.append(mc.alert_block(row.get("_alerts") or []))
-        except Exception:
-            pass
-    else:
-        try:
-            import market_context as mc
-            if row.get("_ctx"):
-                L.append(mc.context_block(row["_ctx"]))
-        except Exception:
-            pass
 
     # Rule-based interpretation
     L.append("## Interpretation")
@@ -515,18 +415,7 @@ if __name__ == "__main__":
     import sys
     key = os.environ.get("FRED_API_KEY", "")
     mode = sys.argv[1] if len(sys.argv) > 1 else "daily"
-
-    # LOG_FORCE lets a manual workflow_dispatch (which the YAML gate already
-    # decided SHOULD run regardless of day) reach this script and override the
-    # internal trading-day check too. Without it, `python auto_log.py daily` on
-    # a weekend returns {"skipped": True} having written NOTHING — which then
-    # makes the workflow's commit step fail on a logs/ directory that was never
-    # created. run_weekly() already forces internally, so only daily was
-    # affected. A scheduled cron never sets this, so weekend/holiday skipping
-    # is unchanged in production.
-    force = os.environ.get("LOG_FORCE", "").strip().lower() in ("1", "true", "yes")
-
-    result = run_weekly(key) if mode == "weekly" else run_daily(key, force=force)
+    result = run_weekly(key) if mode == "weekly" else run_daily(key)
     print(json.dumps({k: v for k, v in result.items()
                       if k not in ("targets_json", "drivers")},
                      indent=2, default=str))

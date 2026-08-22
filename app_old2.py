@@ -176,15 +176,6 @@ df = classify_quadrant(df)
 df = rank_signals(df)
 
 # ── Header ─────────────────────────────────────────────────────────────────────
-# Cross-dashboard nav — identical module in all three repos. This dashboard is
-# step 1 of 3: EVIDENCE (where capital is actually moving), which the Markets
-# Dashboard interprets and the All-Weather Dashboard acts on.
-try:
-    import dashboard_links as _dl
-    _dl.render_nav(st, "money_flow")
-except Exception:
-    pass
-
 col_title, col_refresh = st.columns([5, 1])
 with col_title:
     st.markdown("## 📊 Institutional Rotation Dashboard")
