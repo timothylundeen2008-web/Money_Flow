@@ -73,7 +73,7 @@ INTERPRETIVE CAUTIONS (build these into any UI that shows this)
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -590,64 +590,6 @@ def verify_new_source(store: str = DEFAULT_STORE, min_sessions: int = 2) -> dict
 
 
 # ── The actual recommended fix, if you want this done right ────────────────
-
-def backfill_shares_history(ticker: str, days: int = 60) -> "pd.Series | None":
-    """
-    Historical shares outstanding via yfinance's get_shares_full() -- a
-    genuinely different endpoint from everything else in this file. Every
-    OTHER source here (.info's sharesOutstanding, .info's totalAssets)
-    is a LIVE SNAPSHOT with no memory: asking it "what was this on August
-    15th" is not a question it can answer, which is exactly why a brand-new
-    ticker with one successful row has to wait for tomorrow's poll to prove
-    anything -- there is nothing to compare it against yet.
-
-    get_shares_full() is different: it is Yahoo's own historical chart-data
-    endpoint, commonly used to reconstruct historical market cap for STOCKS.
-    Whether it has real per-day resolution for ETFS SPECIFICALLY is
-    UNVERIFIED -- untested against live data, same honest caveat as every
-    other source in this file. If it works, this turns "wait 2-3 real
-    trading days to find out" into "check right now" for exactly the
-    tickers currently stuck in the insufficient/too-new-to-judge bucket.
-
-    Returns None (never raises) if the method is unavailable, returns
-    nothing, or every value is identical (which would mean this source has
-    the SAME snapshot-only limitation as the others, just discovered
-    immediately instead of after a multi-day wait).
-    """
-    try:
-        import yfinance as yf
-        t = yf.Ticker(ticker)
-        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        s = t.get_shares_full(start=start)
-        if s is None or len(s) == 0:
-            return None
-        return s
-    except Exception as e:
-        print(f"[etf_flow][backfill] {ticker}: {type(e).__name__}: {e}")
-        return None
-
-
-def verify_via_backfill(tickers: list[str], days: int = 60) -> dict:
-    """
-    Run backfill_shares_history() against a specific list of tickers (meant
-    for exactly the ones currently stuck as "too new to judge") and report,
-    per ticker, whether REAL historical variation shows up -- an immediate
-    answer instead of a multi-day wait.
-    """
-    out = {"available": {}, "unavailable": [], "checked_at": datetime.now().isoformat()}
-    for tk in tickers:
-        hist = backfill_shares_history(tk, days=days)
-        if hist is None or len(hist) < 2:
-            out["unavailable"].append(tk)
-            continue
-        n_unique = hist.nunique(dropna=True)
-        out["available"][tk] = {
-            "sessions": len(hist), "unique_values": int(n_unique),
-            "varies": n_unique > 1,
-            "first": float(hist.iloc[0]), "last": float(hist.iloc[-1]),
-        }
-    return out
-
 
 def aws_data_exchange_stub(dataset_arn: str = "", region: str = "us-east-1"):
     """

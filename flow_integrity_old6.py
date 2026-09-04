@@ -340,37 +340,12 @@ def render(st, store: str = "data/etf_shares_history.csv") -> dict:
                     st.markdown("**Too new to judge yet (1 session only):**")
                     st.caption(
                         "A single data point cannot be 'static' -- there is "
-                        "nothing yet to compare it against. Waiting for "
-                        "tomorrow's poll is one way to find out; the button "
-                        "below checks a DIFFERENT, genuinely historical "
-                        "source right now instead of waiting."
+                        "nothing yet to compare it against. This is NOT "
+                        "evidence of a problem; it means the next poll run "
+                        "will be the first real test for these tickers."
                     )
                     for tk in sorted(trust["insufficient"]):
                         st.caption(f"○ {tk}")
-
-                    if st.button("🔍 Check historical data now instead of "
-                                "waiting", key="backfill_check"):
-                        try:
-                            from etf_flow_tracker import verify_via_backfill
-                            with st.spinner("Checking yfinance's "
-                                           "get_shares_full() -- a real "
-                                           "historical endpoint, not a live "
-                                           "snapshot…"):
-                                bf = verify_via_backfill(
-                                    sorted(trust["insufficient"]))
-                            for tk, info in bf["available"].items():
-                                icon = "✅" if info["varies"] else "⚠️"
-                                st.caption(
-                                    f"{icon} {tk} — {info['sessions']} "
-                                    f"historical sessions, "
-                                    f"{info['unique_values']} distinct "
-                                    f"values, first {info['first']:,.0f} → "
-                                    f"last {info['last']:,.0f}")
-                            for tk in bf["unavailable"]:
-                                st.caption(f"○ {tk} — get_shares_full() "
-                                         f"returned nothing usable")
-                        except Exception as e:
-                            st.caption(f"⚠ Backfill check unavailable: {e}")
                 errs = {}
                 try:
                     from etf_flow_tracker import load_last_run_errors
