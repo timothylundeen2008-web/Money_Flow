@@ -276,82 +276,9 @@ def render(st, store: str = "data/etf_shares_history.csv") -> dict:
         st.error(f"**{rep['headline']}**\n\n{m['detail']}\n\n"
                  f"**Action:** {m['action']}")
     elif rep["status"] == STATUS_SUSPECT:
-        # v3, Sept 2026: ATTRIBUTE the verdict to the specific sub-check
-        # that actually triggered it. full_report() combines TWO independent
-        # checks (shares movement, poll continuity) into one overall status
-        # via `SUSPECT in (moves.status, cont.status)` -- either one alone
-        # can produce the SUSPECT headline. Previously this box always
-        # displayed the SHARES sub-check's own detail text regardless of
-        # WHICH check actually failed, so a case where shares movement was
-        # genuinely OK (above its own 25% threshold) but continuity had
-        # gaps rendered as "SUSPECT" next to text that literally said "OK:
-        # 20/31 tickers... show share-count movement" -- correct in
-        # isolation, deeply confusing in context. Both sub-checks are now
-        # shown separately, each labeled with its OWN status.
-        st.warning(f"**{rep['headline']}**")
-        _m_ok = m["status"] != STATUS_SUSPECT and m["status"] != STATUS_BROKEN
-        _c_ok = c["status"] != STATUS_SUSPECT
-        st.markdown(f"{'✅' if _m_ok else '⚠️'} **Shares movement:** {m['detail']}")
-        if c.get("detail"):
-            st.markdown(f"{'✅' if _c_ok else '⚠️'} **Poll continuity:** {c['detail']}")
-        if _m_ok and not _c_ok:
-            st.caption(
-                "The shares-movement check PASSED on its own — this SUSPECT "
-                "verdict is driven entirely by missing polling days, not by "
-                "data quality. A 65% movement rate above this check's 25% "
-                "threshold is a genuine pass, separate from whether the "
-                "poll ran every day."
-            )
-        elif not _m_ok and _c_ok:
-            st.caption(
-                "Polling ran on schedule — this SUSPECT verdict is driven "
-                "entirely by too few tickers showing real movement, not by "
-                "missing days."
-            )
-
-        # ── WHICH tickers, by name — added Sept 2026 ─────────────────────────
-        # The aggregate "20/31 (65%)" figure alone can't answer the question
-        # that actually matters: is 20/31 a STABLE, explicable state (some
-        # funds' data genuinely isn't available a given way) or a bug? Two
-        # consecutive fresh runs landing on the identical 20/31 is itself
-        # informative -- a bug from network flakiness would likely vary run
-        # to run; a fixed data-availability limit per ticker would not. This
-        # makes that distinguishable by showing WHICH ones, not just how many.
-        trust = trustworthy_tickers(store)
-        if trust["unconfirmed"] or trust["never_seen"]:
-            with st.expander(
-                f"Which tickers, specifically ({len(trust['unconfirmed'])} "
-                f"unconfirmed, {len(trust['never_seen'])} never seen)",
-                expanded=True):
-                errs = {}
-                try:
-                    from etf_flow_tracker import load_last_run_errors
-                    errs = load_last_run_errors(store).get("errors", {})
-                except Exception:
-                    pass
-
-                if trust["unconfirmed"]:
-                    st.markdown("**Present but not moving:**")
-                    for tk in sorted(trust["unconfirmed"]):
-                        reason = errs.get(tk)
-                        if reason:
-                            st.caption(f"○ {tk} — {reason[-1]}")
-                        else:
-                            st.caption(f"○ {tk} — no error logged; the value "
-                                     f"returned is simply identical every "
-                                     f"session so far.")
-                if trust["never_seen"]:
-                    st.markdown("**Never appeared in the store at all:**")
-                    for tk in sorted(trust["never_seen"]):
-                        reason = errs.get(tk)
-                        st.caption(f"○ {tk}" + (f" — {reason[-1]}" if reason else ""))
-                st.caption(
-                    "If this SAME list repeats across multiple fresh runs "
-                    "(not just multiple dashboard reloads of one run), that "
-                    "is a stable per-ticker data-availability limit, not a "
-                    "transient bug — worth confirming before spending more "
-                    "effort chasing it as one."
-                )
+        st.warning(f"**{rep['headline']}**\n\n{m['detail']}")
+        if c["missing"]:
+            st.caption(f"Continuity: {c['detail']}")
     elif rep["status"] == STATUS_OK:
         st.success(f"**{rep['headline']}** {m['detail']}")
     else:
