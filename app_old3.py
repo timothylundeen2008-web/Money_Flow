@@ -272,38 +272,6 @@ with st.expander("🔍 Data integrity & coverage — read before the panels belo
     except Exception as _e:
         st.warning(f"Coverage banner unavailable: {_e}")
 
-    # ── New-source verification, added Sept 2026 ─────────────────────────────
-    # After the yfinance shares_outstanding bug was confirmed (0/20 tickers
-    # moved across 20 sessions — see the block comment above), etf_flow_tracker
-    # was rewritten with real issuer-direct sources. Those endpoints could not
-    # be tested against live network access when written, so this check is
-    # meant to be looked at IMMEDIATELY after the first few post-fix sessions,
-    # not after another 20-session wait — that wait is exactly what let the
-    # original bug run silently for weeks. No separate script, no terminal —
-    # reload this dashboard after each of the first few post-deploy sessions
-    # and read this box.
-    st.markdown("---")
-    st.markdown("**New shares-outstanding source — verification**")
-    try:
-        import etf_flow_tracker as _eft
-        _v = _eft.verify_new_source()
-        _vcolour = {True: "#16a34a", "partial": "#d97706",
-                   False: "#dc2626"}.get(_v.get("ok"), "#6b7280")
-        st.markdown(
-            f"<span style='color:{_vcolour};font-weight:700;'>"
-            f"{('WORKING' if _v.get('ok') is True else 'PARTIAL' if _v.get('ok')=='partial' else 'NOT YET CONFIRMED')}"
-            f"</span> — {_v.get('message','')}", unsafe_allow_html=True)
-        if _v.get("by_source"):
-            st.caption("By source: " + " · ".join(
-                f"{src} ({d['moved']} moved / {d['static']} static)"
-                for src, d in _v["by_source"].items()))
-        if _v.get("detail"):
-            with st.expander(f"Still-static tickers ({len(_v['detail'])})"):
-                for line in _v["detail"]:
-                    st.caption(line)
-    except Exception as _e:
-        st.caption(f"⚠ Verification unavailable: {_e}")
-
 
 def _tier_a_readable() -> bool:
     """
