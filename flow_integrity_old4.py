@@ -64,8 +64,7 @@ MIN_MOVERS_FRACTION = 0.25
 MIN_DATES = 2
 
 
-def trustworthy_tickers(store: str = "data/etf_shares_history.csv",
-                        min_sessions: int = 2) -> dict:
+def trustworthy_tickers(store: str = "data/etf_shares_history.csv") -> dict:
     """
     WHICH specific tickers have confirmed, moving shares_outstanding data —
     not just the aggregate count check_shares_move() reports.
@@ -84,16 +83,7 @@ def trustworthy_tickers(store: str = "data/etf_shares_history.csv",
     tracked tickers could go missing from every diagnostic without a single
     logged reason.
     """
-    # v2, Sept 2026: distinguish "too little history to judge" from
-    # "genuinely static across enough sessions to be suspicious". A ticker
-    # with exactly ONE recorded row will always show nunique<=1 trivially --
-    # a single value cannot be "not unique" relative to itself -- so without
-    # this check a brand-new source's first-ever successful row looked
-    # identical to a confirmed-broken one. Caught directly from a real
-    # dashboard screenshot where 11 tickers each showed "all 1 recorded
-    # values identical", which is not evidence of staleness at all.
-    out = {"confirmed": set(), "unconfirmed": set(), "insufficient": set(),
-          "never_seen": set()}
+    out = {"confirmed": set(), "unconfirmed": set(), "never_seen": set()}
     try:
         df = pd.read_csv(store)
     except Exception:
@@ -108,9 +98,7 @@ def trustworthy_tickers(store: str = "data/etf_shares_history.csv",
 
     for tk in seen:
         g = df[df["ticker"] == tk].sort_values("date")
-        if len(g) < min_sessions:
-            out["insufficient"].add(tk)
-        elif g["shares_outstanding"].nunique(dropna=True) > 1:
+        if g["shares_outstanding"].nunique(dropna=True) > 1:
             out["confirmed"].add(tk)
         else:
             out["unconfirmed"].add(tk)
@@ -330,22 +318,11 @@ def render(st, store: str = "data/etf_shares_history.csv") -> dict:
         # to run; a fixed data-availability limit per ticker would not. This
         # makes that distinguishable by showing WHICH ones, not just how many.
         trust = trustworthy_tickers(store)
-        if trust["unconfirmed"] or trust["never_seen"] or trust["insufficient"]:
+        if trust["unconfirmed"] or trust["never_seen"]:
             with st.expander(
                 f"Which tickers, specifically ({len(trust['unconfirmed'])} "
-                f"unconfirmed, {len(trust['insufficient'])} too new to judge, "
-                f"{len(trust['never_seen'])} never seen)",
+                f"unconfirmed, {len(trust['never_seen'])} never seen)",
                 expanded=True):
-                if trust["insufficient"]:
-                    st.markdown("**Too new to judge yet (1 session only):**")
-                    st.caption(
-                        "A single data point cannot be 'static' -- there is "
-                        "nothing yet to compare it against. This is NOT "
-                        "evidence of a problem; it means the next poll run "
-                        "will be the first real test for these tickers."
-                    )
-                    for tk in sorted(trust["insufficient"]):
-                        st.caption(f"○ {tk}")
                 errs = {}
                 try:
                     from etf_flow_tracker import load_last_run_errors
