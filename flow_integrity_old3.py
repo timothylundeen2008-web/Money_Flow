@@ -332,44 +332,10 @@ def render(st, store: str = "data/etf_shares_history.csv") -> dict:
 
                 if trust["unconfirmed"]:
                     st.markdown("**Present but not moving:**")
-                    try:
-                        raw = pd.read_csv(store)
-                    except Exception:
-                        raw = None
                     for tk in sorted(trust["unconfirmed"]):
                         reason = errs.get(tk)
                         if reason:
                             st.caption(f"○ {tk} — {reason[-1]}")
-                        elif raw is not None:
-                            # No logged error means the source likely
-                            # returned a value WITHOUT raising -- show what
-                            # it actually returned and from where, since
-                            # "no error" and "silently stale" look identical
-                            # otherwise. If shares_source is aum_implied and
-                            # the value truly never varies, that is very
-                            # likely the SAME staleness problem one layer
-                            # down: totalAssets may ALSO only update
-                            # periodically for these specific funds, not
-                            # daily -- worth confirming directly rather than
-                            # assuming this source is fixed just because it
-                            # returns something without erroring.
-                            g = raw[raw["ticker"] == tk].sort_values("date")
-                            if len(g):
-                                src = g["shares_source"].iloc[-1] if "shares_source" in g else "?"
-                                vals = g["shares_outstanding"]
-                                n_unique = vals.nunique(dropna=True)
-                                if n_unique == 1:
-                                    summary = (f"all {len(vals)} recorded values "
-                                              f"identical: {vals.iloc[-1]:,.0f}")
-                                else:
-                                    summary = (f"{n_unique} distinct values across "
-                                              f"{len(vals)} sessions, latest: "
-                                              f"{vals.iloc[-1]:,.0f}")
-                                st.caption(
-                                    f"○ {tk} — no error logged, source: "
-                                    f"**{src}**. {summary}")
-                            else:
-                                st.caption(f"○ {tk} — no error logged, no rows found.")
                         else:
                             st.caption(f"○ {tk} — no error logged; the value "
                                      f"returned is simply identical every "
