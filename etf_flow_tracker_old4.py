@@ -296,12 +296,9 @@ def _shares_from_yfinance(ticker: str) -> tuple[float | None, float | None]:
             info = t.info or {}
             shares = shares or info.get("sharesOutstanding")
             price = price or info.get("navPrice") or info.get("previousClose")
-        if not shares or not price:
-            _log_error(ticker, "yfinance", RuntimeError(
-                "fast_info and .info both returned no usable shares/price"))
         return shares, price
     except Exception as e:
-        _log_error(ticker, "yfinance", e)
+        print(f"[etf_flow][yfinance] {ticker}: {type(e).__name__}: {e}")
         return None, None
 
 
@@ -537,17 +534,12 @@ def verify_new_source(store: str = DEFAULT_STORE, min_sessions: int = 2) -> dict
                 "message": "No history yet — nothing to verify."}
 
     out = {"ok": None, "by_source": {}, "moved": 0, "static": 0,
-          "insufficient": 0, "insufficient_tickers": [],
-          "never_seen_tickers": [], "detail": []}
-
-    seen = set(hist["ticker"].unique())
-    out["never_seen_tickers"] = sorted(set(TRACKED) - seen)
+          "insufficient": 0, "detail": []}
 
     for tk, g in hist.groupby("ticker"):
         g = g.sort_values("date")
         if len(g) < min_sessions:
             out["insufficient"] += 1
-            out["insufficient_tickers"].append(tk)
             continue
         src = g["shares_source"].iloc[-1]
         out["by_source"].setdefault(src, {"moved": 0, "static": 0})

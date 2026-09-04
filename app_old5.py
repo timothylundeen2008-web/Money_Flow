@@ -1222,62 +1222,21 @@ st.caption(
 )
 
 # This heading asks a Tier A question ("where's the money") while the
-# v2, Sept 2026: PER-TICKER confirmation, not a blanket gate.
-# _tier_a_readable() is a correct, deliberately strict ALL-OR-NOTHING check
-# on the whole layer -- and 20 of 31 tracked tickers now have genuinely
-# confirmed capital data (flow_integrity.trustworthy_tickers()). A blanket
-# "capital layer is dark" warning was true in aggregate but wasted that
-# real, usable confirmation for every ticker that actually has it. The
-# panel now marks each row individually: CONFIRMED tickers get their real
-# Tier A status; everything else keeps the honest Tier-B-only caveat. This
-# is exactly the distinction the dashboard's own stated purpose -- clearly
-# identifying money movement, not a blanket verdict -- requires.
-try:
-    import flow_integrity as _fi
-    _trust = _fi.trustworthy_tickers()
-except Exception:
-    _trust = {"confirmed": set(), "unconfirmed": set(), "never_seen": set()}
-
+# Institutional Flow Score is computed from Tier B inputs. When the capital
+# layer is dark that gap must be stated, or the title itself implies a capital
+# measurement the data cannot support.
 if not _tier_a_readable():
-    _n_conf = len(_trust["confirmed"])
-    if _n_conf > 0:
-        st.warning(
-            f"⚠ **The capital layer is PARTIALLY dark — "
-            f"{_n_conf} of {_n_conf + len(_trust['unconfirmed']) + len(_trust['never_seen'])} "
-            f"tracked tickers have confirmed capital data, the rest do not.** "
-            f"Rows below marked ✅ Tier A confirmed reflect real ETF "
-            f"creation/redemption evidence — genuine money movement, not an "
-            f"inference. Rows without that mark are Institutional Flow Score "
-            f"only: directional volume pressure and relative strength, a "
-            f"useful screen for *candidates*, not evidence dollars moved. "
-            f"Confirm those against COT percentiles before sizing anything."
-        )
-    else:
-        st.warning(
-            "⚠ **The capital layer is dark — this ranking cannot literally answer "
-            "\"where's the money\".** The Institutional Flow Score below is built "
-            "from directional volume pressure and relative strength, not from ETF "
-            "creations/redemptions. It is a useful screen for *candidates*; it is "
-            "not evidence that dollars moved. Confirm against COT percentiles "
-            "before sizing anything."
-        )
-
-def _annotate_tier_a(df):
-    """
-    Per-ticker confirmation, applied on EVERY fetch -- not just the first.
-    The top_n selector below refetches movers_df from scratch; without
-    re-running this on that refetch too, the confirmation column would
-    silently vanish the moment a user changed "Show top" from 10 to 15/20.
-    """
-    if df is None or df.empty or "ticker" not in df.columns:
-        return df
-    df = df.copy()
-    df["tier_a_confirmed"] = df["ticker"].apply(
-        lambda t: "✅ Confirmed" if t in _trust["confirmed"] else "○ Unconfirmed")
-    return df
+    st.warning(
+        "⚠ **The capital layer is dark — this ranking cannot literally answer "
+        "\"where's the money\".** The Institutional Flow Score below is built "
+        "from directional volume pressure and relative strength, not from ETF "
+        "creations/redemptions. It is a useful screen for *candidates*; it is "
+        "not evidence that dollars moved. Confirm against COT percentiles "
+        "before sizing anything."
+    )
 
 with st.spinner("Loading ETF flow data…"):
-    movers_df = _annotate_tier_a(fetch_top_movers(top_n=10))
+    movers_df = fetch_top_movers(top_n=10)
 
 if movers_df is not None and not movers_df.empty:
 
@@ -1300,7 +1259,7 @@ if movers_df is not None and not movers_df.empty:
         )
 
     if top_n != 10:
-        movers_df = _annotate_tier_a(fetch_top_movers(top_n=top_n))
+        movers_df = fetch_top_movers(top_n=top_n)
 
     display_df = movers_df.copy()
     if cat_filter != "All":
@@ -1379,15 +1338,6 @@ if movers_df is not None and not movers_df.empty:
                      'color:#9FE1CB;padding:1px 5px;border-radius:4px;margin-left:4px">'
                      '🤫 QUIET</span>')
 
-        _t_a_conf = row.get("tier_a_confirmed", "○ Unconfirmed")
-        tier_a_badge = (
-            '<span style="font-size:8px;background:rgba(29,158,117,0.25);'
-            'color:#9FE1CB;padding:1px 4px;border-radius:4px;margin-left:5px;'
-            'vertical-align:middle" title="Real ETF creation/redemption '
-            'evidence — genuine capital movement, not an inference">'
-            '✅ Tier A</span>'
-        ) if _t_a_conf.startswith("✅") else ""
-
         accum_val = row.get("accumulation_score", float("nan"))
         accum_display = f"{accum_val:.0f}" if pd.notna(accum_val) else "—"
         event_val = row.get("event_score", 0.0)
@@ -1401,7 +1351,7 @@ if movers_df is not None and not movers_df.empty:
                text-align:center;flex-shrink:0">{rank}</div>
 
           <div style="flex:0 0 130px">
-            <div style="font-size:15px;font-weight:600;color:var(--text-color)">{row["ticker"]}{tier_a_badge}</div>
+            <div style="font-size:15px;font-weight:600;color:var(--text-color)">{row["ticker"]}</div>
             <div style="font-size:11px;color:#6b7280;margin-top:1px">{row["name"]}</div>
             <div style="font-size:10px;color:#4b5563;margin-top:1px">{row["category"]}</div>
           </div>

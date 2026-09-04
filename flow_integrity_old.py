@@ -64,47 +64,6 @@ MIN_MOVERS_FRACTION = 0.25
 MIN_DATES = 2
 
 
-def trustworthy_tickers(store: str = "data/etf_shares_history.csv") -> dict:
-    """
-    WHICH specific tickers have confirmed, moving shares_outstanding data —
-    not just the aggregate count check_shares_move() reports.
-
-    Added Sept 2026: check_shares_move()'s per-ticker loop already computes
-    this internally to build its aggregate movers/total count, but never
-    exposed the actual ticker-level result. That gap meant a genuinely
-    strict, correct all-or-nothing gate (_tier_a_readable() in app.py) had
-    no way to be anything OTHER than all-or-nothing — there was no per-
-    ticker signal to build a graduated version from. This is that signal.
-
-    Returns {"confirmed": {tickers with real movement}, "unconfirmed": {...},
-             "never_seen": {tracked tickers absent from the store entirely}}.
-    A ticker with genuinely ZERO rows ever is a DIFFERENT state from one
-    that's present but static — conflating them was part of why 11 of 31
-    tracked tickers could go missing from every diagnostic without a single
-    logged reason.
-    """
-    out = {"confirmed": set(), "unconfirmed": set(), "never_seen": set()}
-    try:
-        df = pd.read_csv(store)
-    except Exception:
-        return out
-
-    seen = set(df["ticker"].unique()) if "ticker" in df.columns else set()
-    try:
-        from etf_flow_tracker import TRACKED
-        out["never_seen"] = set(TRACKED) - seen
-    except Exception:
-        pass
-
-    for tk in seen:
-        g = df[df["ticker"] == tk].sort_values("date")
-        if g["shares_outstanding"].nunique(dropna=True) > 1:
-            out["confirmed"].add(tk)
-        else:
-            out["unconfirmed"].add(tk)
-    return out
-
-
 def check_shares_move(store: str = "data/etf_shares_history.csv") -> dict:
     """
     Verify shares_outstanding actually varies over time.
