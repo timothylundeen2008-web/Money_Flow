@@ -160,12 +160,7 @@ def _shares_from_spdr(ticker: str) -> tuple[float | None, float | None]:
     """
     try:
         import requests
-        # v3: the /us/en/individual/etfs/ prefix 404'd via a server redirect
-        # to this shorter path (confirmed from the actual captured error on
-        # XLE's first live run) -- trying the redirect target directly.
-        # Still unverified whether the FILE exists at this path; only the
-        # path PREFIX is corrected from real evidence.
-        url = (f"https://www.ssga.com/library-content/"
+        url = (f"https://www.ssga.com/us/en/individual/etfs/library-content/"
               f"products/fund-data/etfs/us/fund-data-{ticker.lower()}-us-en.json")
         r = requests.get(url, timeout=15,
                          headers={"User-Agent": "Mozilla/5.0"})
@@ -327,23 +322,16 @@ def _snapshot_one(ticker: str) -> dict | None:
     shares = price = None
     used = None
 
-    # v3 REORDER, Sept 2026: aum_implied tried FIRST. The first real run
-    # against live data confirmed it (20/31 tickers moving) while every
-    # issuer-direct guess so far returned 404/500 -- see the specific
-    # errors captured in load_last_run_errors(). Empirical evidence beats
-    # a plausible-sounding guess; issuer-direct stays as a second attempt
-    # in case a fix lands or a vendor's site changes, but no longer gates
-    # the primary path.
-    aum_shares, aum_price = _shares_from_aum_implied(ticker)
-    if aum_shares:
-        shares, price, used = aum_shares, aum_price, "aum_implied"
+    primary = _issuer_source_for(ticker)
+    if primary is not None:
+        s, p = primary(ticker)
+        if s and p:
+            shares, price, used = s, p, primary.__name__.replace("_shares_from_", "")
 
-    if shares is None:
-        primary = _issuer_source_for(ticker)
-        if primary is not None:
-            s, p = primary(ticker)
-            if s and p:
-                shares, price, used = s, p, primary.__name__.replace("_shares_from_", "")
+    aum_shares, aum_price = _shares_from_aum_implied(ticker)
+
+    if shares is None and aum_shares:
+        shares, price, used = aum_shares, (price or aum_price), "aum_implied"
 
     if shares is None:
         s, p = _shares_from_yfinance(ticker)
