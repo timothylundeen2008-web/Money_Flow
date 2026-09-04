@@ -301,6 +301,33 @@ with st.expander("🔍 Data integrity & coverage — read before the panels belo
             with st.expander(f"Still-static tickers ({len(_v['detail'])})"):
                 for line in _v["detail"]:
                     st.caption(line)
+
+        # ── Actual per-source error messages, read from the sidecar file ────
+        # Written by the LAST snapshot_all() run — which happens as a
+        # scheduled GitHub Action, a separate process from this live app, so
+        # its print() output was never visible here before this. No trip to
+        # "Manage app" logs required; this IS the diagnostic.
+        _errs = _eft.load_last_run_errors()
+        if _errs.get("errors"):
+            with st.expander(
+                f"🔍 Why each source failed (from the run at "
+                f"{_errs.get('run_at', '?')})", expanded=True):
+                st.caption(
+                    "Captured directly from the scheduled snapshot run — "
+                    "the exact exception or reason each source returned "
+                    "nothing for each ticker, in the order sources were "
+                    "tried."
+                )
+                for tk, msgs in _errs["errors"].items():
+                    st.markdown(f"**{tk}**")
+                    for m in msgs:
+                        st.caption(f"  · {m}")
+        elif _errs.get("run_at") is None:
+            st.caption(
+                "No error sidecar yet — this diagnostic ships with this "
+                "update, so it only has data starting from the NEXT "
+                "snapshot run. Trigger one manually to populate it."
+            )
     except Exception as _e:
         st.caption(f"⚠ Verification unavailable: {_e}")
 

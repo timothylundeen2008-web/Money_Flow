@@ -88,47 +88,6 @@ except Exception:
 
 DEFAULT_STORE = os.environ.get("ETF_FLOW_STORE", "data/etf_shares_history.csv")
 
-# The scheduled snapshot runs as a GitHub Action, a SEPARATE process from the
-# live Streamlit app. print() statements during that run go to the Action's
-# own log, which the app cannot see. This registry is written to a small
-# JSON sidecar alongside the CSV store so the app CAN read exactly what
-# failed, in the same place it already shows verification status — no trip
-# to "Manage app" logs required.
-_RUN_ERRORS: dict[str, list[str]] = {}
-
-
-def _log_error(ticker: str, source: str, exc: Exception) -> None:
-    msg = f"{source}: {type(exc).__name__}: {exc}"
-    print(f"[etf_flow][{source}] {ticker}: {type(exc).__name__}: {exc}")
-    _RUN_ERRORS.setdefault(ticker, []).append(msg)
-
-
-def _errors_path(store: str) -> str:
-    base, _ = os.path.splitext(store)
-    return base + "_last_run_errors.json"
-
-
-def load_last_run_errors(store: str = DEFAULT_STORE) -> dict:
-    """
-    What failed on the MOST RECENT snapshot_all() run, per ticker. Written
-    by that run as a sidecar file next to the CSV store, since the run
-    itself happens in a separate process (a scheduled Action) from whatever
-    reads this — usually the live dashboard.
-
-    Returns {"run_at": iso timestamp, "errors": {ticker: [messages]}} or a
-    clearly-empty dict if the sidecar doesn't exist yet (e.g. no run has
-    happened since this feature was added).
-    """
-    path = _errors_path(store)
-    if not os.path.exists(path):
-        return {"run_at": None, "errors": {}}
-    try:
-        import json
-        with open(path) as f:
-            return json.load(f)
-    except Exception as e:
-        return {"run_at": None, "errors": {}, "load_error": str(e)}
-
 TRACKED = [
     # All-Weather sleeves
     "VGT", "SMH", "QQQ", "GLD", "SLV", "RING", "XLE", "PDBC", "SCHD",
@@ -172,12 +131,9 @@ def _shares_from_spdr(ticker: str) -> tuple[float | None, float | None]:
                  or data.get("closePrice"))
         if shares and price:
             return float(shares), float(price)
-        _log_error(ticker, "spdr", RuntimeError(
-            f"response parsed but no shares/price found in expected keys "
-            f"(got keys: {list(data.keys())[:8]})"))
         return None, None
     except Exception as e:
-        _log_error(ticker, "spdr", e)
+        print(f"[etf_flow][spdr] {ticker}: {type(e).__name__}: {e}")
         return None, None
 
 
@@ -199,12 +155,9 @@ def _shares_from_spdr_gold(ticker: str) -> tuple[float | None, float | None]:
         price = data.get("navPerShare") or data.get("closePrice")
         if shares and price:
             return float(shares), float(price)
-        _log_error(ticker, "spdr_gold", RuntimeError(
-            f"response parsed but no shares/price found in expected keys "
-            f"(got keys: {list(data.keys())[:8]})"))
         return None, None
     except Exception as e:
-        _log_error(ticker, "spdr_gold", e)
+        print(f"[etf_flow][spdr_gold] {ticker}: {type(e).__name__}: {e}")
         return None, None
 
 
@@ -230,11 +183,9 @@ def _shares_from_ishares(ticker: str) -> tuple[float | None, float | None]:
         price = row.get("navAmount") or row.get("closePrice")
         if shares and price:
             return float(shares), float(price)
-        _log_error(ticker, "ishares", RuntimeError(
-            f"response parsed but no matching row/shares found"))
         return None, None
     except Exception as e:
-        _log_error(ticker, "ishares", e)
+        print(f"[etf_flow][ishares] {ticker}: {type(e).__name__}: {e}")
         return None, None
 
 
@@ -258,12 +209,9 @@ def _shares_from_aum_implied(ticker: str) -> tuple[float | None, float | None]:
         price = info.get("navPrice") or info.get("previousClose")
         if aum and price:
             return float(aum) / float(price), float(price)
-        _log_error(ticker, "aum_implied", RuntimeError(
-            f"totalAssets or navPrice/previousClose missing from "
-            f".info (aum={aum!r}, price={price!r})"))
         return None, None
     except Exception as e:
-        _log_error(ticker, "aum_implied", e)
+        print(f"[etf_flow][aum_implied] {ticker}: {type(e).__name__}: {e}")
         return None, None
 
 
@@ -363,24 +311,8 @@ def _snapshot_one(ticker: str) -> dict | None:
 def snapshot_all(tickers: list[str] | None = None,
                  store: str = DEFAULT_STORE) -> pd.DataFrame:
     """Once-per-trading-day snapshot for every tracked ETF."""
-    global _RUN_ERRORS
-    _RUN_ERRORS = {}   # reset — this run's errors only, not accumulated forever
-
     tickers = tickers or TRACKED
     rows = [r for r in (_snapshot_one(tk) for tk in tickers) if r]
-
-    # Write the sidecar REGARDLESS of whether any rows were captured — an
-    # all-failure run is exactly the case this exists to diagnose, and it
-    # must not be the one case that produces no diagnostic file.
-    try:
-        import json
-        os.makedirs(os.path.dirname(store) or ".", exist_ok=True)
-        with open(_errors_path(store), "w") as f:
-            json.dump({"run_at": datetime.now().isoformat(),
-                      "errors": _RUN_ERRORS}, f, indent=2)
-    except Exception as e:
-        print(f"[etf_flow] could not write error sidecar: {e}")
-
     if not rows:
         print("[etf_flow] no snapshots captured")
         return pd.DataFrame()
