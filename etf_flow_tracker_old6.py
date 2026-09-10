@@ -137,22 +137,6 @@ TRACKED = [
     "XLK", "XLF", "XLI", "XLY", "XLRE", "XLB", "XLC", "XLP",
     # Key sub-sectors
     "KRE", "IBB", "XOP", "ITA", "PAVE", "IWM", "HYG", "EEM",
-    # v3, Sept 2026: expanded to match top_movers.ETF_UNIVERSE exactly.
-    # Before this, only 14 of the 40 tickers the "Where's the Money" ranking
-    # could display were ever polled for Tier A capital data -- the other 26
-    # were structurally incapable of showing a Tier A badge, not because
-    # their flow data was worse, but because they were never in this list at
-    # all. This closes that gap; every ranked ticker is now Tier-A-eligible.
-    "SOXX", "IGV", "SKYY", "HACK",              # Technology
-    "KBE", "IAI",                                 # Financial
-    "XBI", "IHI", "PPH",                          # Healthcare
-    "OIH", "AMLP",                                # Energy
-    "XTN",                                         # Industrials
-    "XRT", "XHB", "PBJ",                          # Consumer
-    "IWO", "MDY",                                  # Broad Market
-    "LQD", "EMB", "TIP",                          # Fixed Income
-    "USO", "DBA",                                  # Commodities
-    "EFA", "EWJ", "FXI", "INDA",                  # International
 ]
 
 # ── Issuer routing table ────────────────────────────────────────────────────
