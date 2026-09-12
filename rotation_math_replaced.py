@@ -292,35 +292,3 @@ def get_rotation_summary(df: pd.DataFrame) -> dict:
         "avg_rs_ratio":       df["rs_ratio"].mean(),
         "avg_rs_momentum":    df["rs_momentum"].mean(),
     }
-
-
-# ── Step 6: The full pipeline — ONE definition, every caller ─────────────────
-
-PIPELINE = (
-    compute_rs_ratio,
-    compute_rs_momentum,
-    compute_spread,
-    compute_stealth_accumulation,
-    compute_rotation_history,
-    classify_quadrant,
-    rank_signals,
-)
-
-
-def run_pipeline(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Raw fetch_sector_data() output -> fully scored RRG table.
-
-    This is the same seven steps app.py always ran before rendering. It
-    lives here so that publish_to_checklist.py (the scheduled path that
-    feeds rotation_bridge -> Portfolio-Tracker -> Swing Desk) runs the
-    IDENTICAL pipeline. Before this function existed the publisher shipped
-    the raw fetch with no `quadrant` column, so the Swing Desk's rotation
-    confluence leg could never pass from scheduled data. One pipeline, two
-    callers -- two copies would drift.
-    """
-    if df is None or df.empty:
-        return df
-    for step in PIPELINE:
-        df = step(df)
-    return df

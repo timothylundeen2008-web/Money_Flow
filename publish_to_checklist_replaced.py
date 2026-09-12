@@ -60,25 +60,13 @@ def main() -> int:
     print(f"[publish] starting {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC")
 
     from data_fetcher import fetch_sector_data
-    from rotation_math import run_pipeline
     from etf_flow_tracker import flow_vs_price_divergence, coverage_report
     from cot_fetcher import build_cot_table, verify_schema
     from constituent_breadth import build_breadth_table
     from rotation_bridge import publish_summary
 
-    # Run the SAME RRG pipeline app.py runs before rendering. Publishing the
-    # raw fetch (the previous behaviour) shipped sector rows with no
-    # `quadrant` -- so the Swing Desk's rotation leg never passed and the
-    # Money Flow discovery screen found no hunting grounds. Same pipeline,
-    # same numbers the dashboard shows.
-    def _sector_pipeline():
-        return run_pipeline(fetch_sector_data())
-
-    sector_df = _safe("sector_df", _sector_pipeline)
-    _n = 0 if sector_df is None else len(sector_df)
-    _q = (sector_df["quadrant"].value_counts().to_dict()
-          if sector_df is not None and "quadrant" in sector_df.columns else "MISSING")
-    print(f"[publish] sector_df: {_n} rows, quadrants={_q}")
+    sector_df = _safe("sector_df", fetch_sector_data)
+    print(f"[publish] sector_df: {0 if sector_df is None else len(sector_df)} rows")
 
     cov = _safe("etf flow coverage check", coverage_report) or {}
     print(f"[publish] ETF flow coverage: {cov.get('message', 'unknown')}")

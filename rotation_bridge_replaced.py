@@ -72,14 +72,9 @@ def publish_summary(sector_df: pd.DataFrame | None = None,
     }
 
     if sector_df is not None and not sector_df.empty:
-        # quadrant + rotation_direction + spread are what the Swing Desk's
-        # Level-2 leg reads: the quadrant says WHERE, the arrow (Strengthening
-        # vs Bottoming hook) says which PHASE of the rotation you are entering.
-        keep = [c for c in ("ticker", "sector", "quadrant", "rotation_direction",
-                            "rs_ratio", "rs_momentum", "spread", "signal_score",
-                            "accumulation_score", "event_score", "stealth_label",
-                            "cmf", "vol_ratio", "signal", "momentum_accel")
-                if c in sector_df.columns]
+        keep = [c for c in ("ticker", "sector", "quadrant", "accumulation_score",
+                            "event_score", "stealth_label", "cmf", "vol_ratio",
+                            "signal", "momentum_accel") if c in sector_df.columns]
         d = sector_df[keep].copy()
         if "accumulation_score" in d.columns:
             d = d.sort_values("accumulation_score", ascending=False, na_position="last")

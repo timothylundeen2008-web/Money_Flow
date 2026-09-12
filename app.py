@@ -53,6 +53,7 @@ from rotation_math import (
     compute_rotation_history,
     classify_quadrant,
     rank_signals,
+    run_pipeline,
 )
 
 # ── Page config ────────────────────────────────────────────────────────────────
@@ -167,13 +168,8 @@ if df is None or df.empty:
     st.error("Could not fetch data. Check your connection and try again.")
     st.stop()
 
-df = compute_rs_ratio(df)
-df = compute_rs_momentum(df)
-df = compute_spread(df)
-df = compute_stealth_accumulation(df)
-df = compute_rotation_history(df)
-df = classify_quadrant(df)
-df = rank_signals(df)
+# One pipeline, shared with publish_to_checklist.py -- see rotation_math.run_pipeline
+df = run_pipeline(df)
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 # Cross-dashboard nav — identical module in all three repos. This dashboard is
