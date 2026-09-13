@@ -88,8 +88,11 @@ SECTOR_CONSTITUENTS: dict[str, list[tuple[str, float]]] = {
              ("PSA",0.048),("SPG",0.042),("O",0.040),("DLR",0.038),("CBRE",0.030)],
     "XLB":  [("LIN",0.175),("SHW",0.062),("APD",0.058),("FCX",0.055),("ECL",0.050),
              ("NEM",0.048),("NUE",0.035),("DOW",0.030),("PPG",0.028),("VMC",0.027)],
-    "XLC":  [("META",0.215),("GOOGL",0.125),("GOOG",0.105),("NFLX",0.055),("DIS",0.045),
-             ("TMUS",0.042),("VZ",0.038),("CMCSA",0.035),("T",0.033),("EA",0.020)],
+    # 12 Sep 2026: GOOG dropped (same issuer as GOOGL -- double-counted Alphabet in
+    # breadth and took two swing candidate slots); EA dropped (take-private closed,
+    # no longer trades -- returned 'insufficient history' in the first swing brief).
+    "XLC":  [("META",0.215),("GOOGL",0.230),("NFLX",0.055),("DIS",0.045),
+             ("TMUS",0.042),("VZ",0.038),("CMCSA",0.035),("T",0.033),("TTWO",0.020)],
     "XLP":  [("COST",0.150),("PG",0.145),("WMT",0.115),("KO",0.085),("PEP",0.075),
              ("PM",0.060),("MO",0.045),("MDLZ",0.038),("CL",0.033),("TGT",0.025)],
 }
