@@ -1,4 +1,53 @@
 {
-  "run_at": "2026-09-25T21:16:12.838742",
-  "errors": {}
+  "run_at": "2026-09-25T22:16:43.246733",
+  "errors": {
+    "GLD": [
+      "spdr_gold: HTTPError: 404 Client Error: Not Found for url: https://www.spdrgoldshares.com/assets/dynamic/GLD/GLD_US_ajax.json"
+    ],
+    "TLT": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239454/"
+    ],
+    "IBB": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239699/"
+    ],
+    "IWM": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239710/"
+    ],
+    "HYG": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239565/"
+    ],
+    "EEM": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239637/"
+    ],
+    "SOXX": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239705/"
+    ],
+    "IGV": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239771/"
+    ],
+    "IHI": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239516/"
+    ],
+    "IWO": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239709/"
+    ],
+    "LQD": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239566/"
+    ],
+    "EMB": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239572/"
+    ],
+    "TIP": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239467/"
+    ],
+    "EFA": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239623/"
+    ],
+    "EWJ": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239665/"
+    ],
+    "FXI": [
+      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239536/"
+    ]
+  }
 }
