@@ -1,53 +1,53 @@
 {
-  "run_at": "2026-09-25T22:16:43.246733",
+  "run_at": "2026-09-25T23:45:29.909078",
   "errors": {
     "GLD": [
       "spdr_gold: HTTPError: 404 Client Error: Not Found for url: https://www.spdrgoldshares.com/assets/dynamic/GLD/GLD_US_ajax.json"
     ],
     "TLT": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239454/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239454/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "IBB": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239699/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239699/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "IWM": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239710/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239710/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "HYG": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239565/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239565/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "EEM": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239637/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239637/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "SOXX": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239705/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239705/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "IGV": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239771/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239771/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "IHI": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239516/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239516/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "IWO": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239709/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239709/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "LQD": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239566/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239566/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "EMB": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239572/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239572/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "TIP": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239467/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239467/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "EFA": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239623/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239623/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "EWJ": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239665/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239665/: curl_cffi HTTP 403; requests HTTP 403"
     ],
     "FXI": [
-      "ishares: HTTPError: 403 Client Error: Forbidden for url: https://www.ishares.com/us/products/239536/"
+      "ishares: RuntimeError: https://www.ishares.com/us/products/239536/: curl_cffi HTTP 403; requests HTTP 403"
     ]
   }
 }
