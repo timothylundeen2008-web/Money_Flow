@@ -92,21 +92,12 @@ def trustworthy_tickers(store: str = "data/etf_shares_history.csv",
     # identical to a confirmed-broken one. Caught directly from a real
     # dashboard screenshot where 11 tickers each showed "all 1 recorded
     # values identical", which is not evidence of staleness at all.
-    # v3, Sept 2026: "confirmed" now requires REAL capital data, not just a
-    # share count that changes. An aum_implied series whose AUM never updates
-    # changes every day (stale AUM / moving price) and passed the old test;
-    # 35 of 57 tickers were price echoes marked confirmed. Those now land in
-    # "unconfirmed" and are also listed in "artifact" with a reason.
     out = {"confirmed": set(), "unconfirmed": set(), "insufficient": set(),
-          "never_seen": set(), "artifact": set(), "reasons": {}}
+          "never_seen": set()}
     try:
         df = pd.read_csv(store)
     except Exception:
         return out
-    try:
-        from etf_flow_tracker import ticker_quality
-    except Exception:
-        ticker_quality = None
 
     seen = set(df["ticker"].unique()) if "ticker" in df.columns else set()
     try:
@@ -119,20 +110,10 @@ def trustworthy_tickers(store: str = "data/etf_shares_history.csv",
         g = df[df["ticker"] == tk].sort_values("date")
         if len(g) < min_sessions:
             out["insufficient"].add(tk)
-            continue
-        if ticker_quality is None:
-            # Fail CLOSED: without the quality test, nothing is confirmed.
-            out["unconfirmed"].add(tk)
-            out["reasons"][tk] = "quality test unavailable (etf_flow_tracker import failed)"
-            continue
-        q = ticker_quality(g)
-        out["reasons"][tk] = q["reason"]
-        if q["trustworthy"]:
+        elif g["shares_outstanding"].nunique(dropna=True) > 1:
             out["confirmed"].add(tk)
         else:
             out["unconfirmed"].add(tk)
-            if q["artifact"]:
-                out["artifact"].add(tk)
     return out
 
 
@@ -173,19 +154,10 @@ def check_shares_move(store: str = "data/etf_shares_history.csv") -> dict:
         out["action"] = "Re-run this check after the next poll."
         return out
 
-    try:
-        from etf_flow_tracker import ticker_quality
-    except Exception:
-        ticker_quality = None
     movers = price_movers = 0
     for tk in tickers:
         g = df[df["ticker"] == tk].sort_values("date")
-        # Sept 2026: a mover must be a GENUINE mover (issuer data, or an
-        # aum_implied series whose AUM actually updates) — not a stale AUM
-        # divided by a moving price.
-        genuine = (ticker_quality(g)["trustworthy"] if ticker_quality is not None
-                   else False)      # fail closed, same as trustworthy_tickers()
-        if genuine:
+        if g["shares_outstanding"].nunique(dropna=True) > 1:
             movers += 1
         if g["price"].nunique(dropna=True) > 1:
             price_movers += 1
@@ -201,10 +173,9 @@ def check_shares_move(store: str = "data/etf_shares_history.csv") -> dict:
         out["status"] = STATUS_BROKEN
         out["detail"] = (
             f"BROKEN: across {len(dates)} sessions, prices changed for "
-            f"{price_movers}/{len(tickers)} tickers but GENUINE share-count "
-            f"changes were found for {movers}/{len(tickers)} (a stale AUM "
-            f"divided by a moving price does not count). The poll is working; "
-            f"the shares/AUM source is not updating.")
+            f"{price_movers}/{len(tickers)} tickers but shares outstanding "
+            f"changed for {movers}/{len(tickers)}. The poll is working; the "
+            f"shares_outstanding FIELD is static.")
         out["action"] = (
             "Do NOT wait for 20 sessions — the history would be all zeros and "
             "would render as 'no institutional flows'. Replace the shares "

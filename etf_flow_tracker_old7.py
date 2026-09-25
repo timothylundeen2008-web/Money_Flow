@@ -446,108 +446,6 @@ def load_history(store: str = DEFAULT_STORE) -> pd.DataFrame:
     return df.sort_values(["ticker", "date"])
 
 
-# ── Stale-AUM guard (Sept 2026) ──────────────────────────────────────────────
-# aum_implied computes shares = totalAssets / price. When yfinance's
-# totalAssets does not update, the implied share count moves EXACTLY inverse
-# to price: a falling price reads as an inflow, a rising price as an outflow.
-# Measured on the live store (2026-09-24): implied AUM was unchanged on 57%
-# of day-over-day observations, and for 35 of 57 tickers corr(Δln shares,
-# Δln price) was -1.00 across every stored session. The old integrity test
-# (shares.nunique() > 1) passed all of them, because a stale AUM divided by
-# a moving price always "moves".
-#
-# Rules:
-#   * An aum_implied row whose implied AUM equals the prior row's carries NO
-#     flow information. Its flow is NaN, never a number.
-#   * Flow is measured between consecutive AUM UPDATES only, so a real
-#     change that arrives after several stale days is counted once, in full.
-#   * A ticker is trustworthy only if its source is an issuer feed, or if
-#     implied AUM updated on >= MIN_AUM_UPDATE_RATE of sessions AND its share
-#     changes are not a mirror image of price (corr > PRICE_MIRROR_CORR).
-AUM_UNCHANGED_TOL = 1e-6        # relative change below this = "not updated"
-MIN_AUM_UPDATE_RATE = 0.40      # of the last 20 sessions on the current source
-PRICE_MIRROR_CORR = -0.80
-MIN_QUALITY_SESSIONS = 5        # below this, too little history to judge
-MAX_SESSIONS_SINCE_UPDATE = 3   # AUM unchanged longer than this = feed frozen
-
-
-def _stale_aum_rows(g: pd.DataFrame) -> pd.Series:
-    """True for aum_implied rows whose implied AUM didn't change vs the prior row."""
-    aum = g["shares_outstanding"] * g["price"]
-    unchanged = aum.pct_change().abs() < AUM_UNCHANGED_TOL
-    if "shares_source" in g.columns:
-        unchanged &= g["shares_source"].eq("aum_implied")
-    return unchanged.fillna(False)
-
-
-def ticker_quality(g: pd.DataFrame, window: int = 20) -> dict:
-    """Is this ticker's share series real capital data, or a price echo?
-
-    Judged on the CURRENT source only (rows since the source last changed),
-    and on the most recent `window` sessions of it — a feed that updated in
-    early September and froze afterwards is not trustworthy today.
-    yfinance sharesOutstanding is never trusted (annual granularity; see
-    principles). Returns {"sessions", "source", "aum_update_rate",
-    "last_update", "price_mirror_corr", "moving", "artifact", "trustworthy",
-    "reason"}."""
-    g = g.sort_values("date")
-    src = g["shares_source"].iloc[-1] if "shares_source" in g.columns and len(g) else None
-    if "shares_source" in g.columns and len(g):
-        run_id = g["shares_source"].ne(g["shares_source"].shift()).cumsum()
-        g = g[run_id == run_id.iloc[-1]]            # current-source tail only
-    n = len(g)
-    out = {"sessions": n, "source": src, "aum_update_rate": None, "last_update": None,
-           "price_mirror_corr": None, "moving": False, "artifact": False,
-           "trustworthy": False, "reason": ""}
-    if n < 2:
-        out["reason"] = f"fewer than 2 sessions on current source ({src})"
-        return out
-    out["moving"] = bool(g["shares_outstanding"].nunique(dropna=True) > 1)
-    if src == "yfinance":
-        out["reason"] = "yfinance sharesOutstanding is annual-granularity — never capital data"
-        return out
-    if src != "aum_implied":
-        out["trustworthy"] = out["moving"]
-        out["reason"] = f"issuer source ({src})" if out["moving"] else f"{src}: shares never changed"
-        return out
-
-    stale_all = _stale_aum_rows(g)
-    upd_dates = g.loc[~stale_all, "date"].iloc[1:] if n > 1 else pd.Series(dtype=object)
-    out["last_update"] = str(pd.to_datetime(upd_dates.max()).date()) if len(upd_dates) else None
-    stale = stale_all.iloc[1:].iloc[-window:]
-    out["aum_update_rate"] = round(float(1 - stale.mean()), 3)
-    # Sessions since the last real AUM update: a feed that froze recently is
-    # dead today even if its 20-session rate still looks fine.
-    tail_stale = stale_all.iloc[1:][::-1]
-    out["sessions_since_update"] = int(tail_stale.cumprod().sum()) if len(tail_stale) else 0
-    dls = np.log(g["shares_outstanding"]).diff()
-    dlp = np.log(g["price"]).diff()
-    mask = dlp.abs() > 1e-6
-    if mask.sum() >= 3 and dls[mask].std() > 0:
-        out["price_mirror_corr"] = round(float(dls[mask].corr(dlp[mask])), 3)
-    mirror = out["price_mirror_corr"] is not None and out["price_mirror_corr"] <= PRICE_MIRROR_CORR
-    slow = out["aum_update_rate"] < MIN_AUM_UPDATE_RATE
-    frozen = out["sessions_since_update"] > MAX_SESSIONS_SINCE_UPDATE
-    out["artifact"] = bool(mirror or slow or frozen)
-    if n < MIN_QUALITY_SESSIONS:
-        out["reason"] = f"only {n} sessions — too few to trust an aum_implied series"
-    elif out["artifact"]:
-        why = []
-        if slow:
-            why.append(f"AUM updated on only {out['aum_update_rate']:.0%} of the last "
-                       f"{min(window, n - 1)} sessions (last update {out['last_update'] or 'never'})")
-        if frozen:
-            why.append(f"AUM frozen for the last {out['sessions_since_update']} sessions")
-        if mirror:
-            why.append(f"share changes mirror price (corr {out['price_mirror_corr']:+.2f})")
-        out["reason"] = "stale-AUM artifact: " + "; ".join(why)
-    else:
-        out["trustworthy"] = out["moving"]
-        out["reason"] = (f"aum_implied, AUM updated {out['aum_update_rate']:.0%} of sessions"
-                         if out["moving"] else "aum_implied: shares never changed")
-    return out
-
-
 def _flag_splits(g: pd.DataFrame) -> pd.Series:
     sh_ratio = g["shares_outstanding"] / g["shares_outstanding"].shift(1)
     px_ratio = g["price"] / g["price"].shift(1)
@@ -567,14 +465,8 @@ def compute_flows(store: str = DEFAULT_STORE) -> pd.DataFrame:
             continue
         g["aum"] = g["shares_outstanding"] * g["price"]
         g["is_split"] = _flag_splits(g).fillna(False)
-        g["stale_aum"] = _stale_aum_rows(g)
 
-        # Measure share change between consecutive INFORMATIVE rows only
-        # (issuer rows, or aum_implied rows where AUM actually updated).
-        # Stale rows get NaN: no information, not zero and not a price echo.
-        informative = ~g["stale_aum"]
-        d_shares = g["shares_outstanding"].where(informative).ffill().diff()
-        d_shares = d_shares.where(informative)
+        d_shares = g["shares_outstanding"].diff()
         g["net_flow"] = (d_shares * g["price"]).where(~g["is_split"], np.nan)
 
         g["implausible"] = (g["net_flow"].abs() / g["aum"]) > IMPLAUSIBLE_DAILY_FLOW_PCT
@@ -600,17 +492,6 @@ def flow_vs_price_divergence(store: str = DEFAULT_STORE,
         if len(g) < window + 1:
             continue
         px_chg = float(g["price"].iloc[-1] / g["price"].iloc[-window - 1] - 1) * 100
-        q = ticker_quality(g)
-        if not q["trustworthy"]:
-            # Sept 2026: a stale-AUM series says nothing about flow. Report it
-            # as unreliable instead of letting price-inverse noise become an
-            # ACCUMULATION / DISTRIBUTION verdict.
-            rows.append({"ticker": tk, "days": len(g),
-                         "price_chg_pct": round(px_chg, 2),
-                         "net_flow_usd": np.nan, "net_flow_pct_aum": np.nan,
-                         "verdict": f"UNRELIABLE — {q['reason']}",
-                         "divergence": False})
-            continue
         flow = float(g["net_flow"].iloc[-window:].sum(skipna=True))
         aum = float(g["aum"].iloc[-1])
         flow_pct = (flow / aum * 100) if aum else np.nan
@@ -686,17 +567,15 @@ def verify_new_source(store: str = DEFAULT_STORE, min_sessions: int = 2) -> dict
             continue
         src = g["shares_source"].iloc[-1]
         out["by_source"].setdefault(src, {"moved": 0, "static": 0})
-        # Sept 2026: "moved" now means genuinely moved — a stale-AUM series
-        # that only echoes price counts as static, with the reason named.
-        q = ticker_quality(g)
-        if q["trustworthy"]:
+        changed = g["shares_outstanding"].diff().abs().gt(0).any()
+        if changed:
             out["moved"] += 1
             out["by_source"][src]["moved"] += 1
         else:
             out["static"] += 1
             out["by_source"][src]["static"] += 1
-            out["detail"].append(f"{tk} ({src}): {q['reason'] or 'shares_outstanding unchanged'} "
-                                 f"across {len(g)} sessions")
+            out["detail"].append(f"{tk} ({src}): shares_outstanding "
+                                 f"unchanged across {len(g)} sessions")
 
     total_checked = out["moved"] + out["static"]
     out["checked"] = total_checked
@@ -809,76 +688,3 @@ def aws_data_exchange_stub(dataset_arn: str = "", region: str = "us-east-1"):
         "Once subscribed, share the export job's response shape and this "
         "becomes a real, working integration."
     )
-
-
-# ── Selftest: stale-AUM guard (offline, synthetic store) ────────────────────
-
-def selftest() -> dict:
-    import tempfile
-    f = []
-    dates = pd.bdate_range("2026-08-03", periods=30)
-    rng = np.random.default_rng(1)
-    px = 100 * np.cumprod(1 + rng.normal(0, 0.01, len(dates)))
-
-    rows = []
-    # REAL: true shares grow 0.5%/day (inflow); AUM = shares x price, updates daily.
-    sh = 1_000_000 * np.cumprod(np.full(len(dates), 1.005))
-    for d, p, s in zip(dates, px, sh):
-        rows.append({"date": d.date().isoformat(), "ticker": "REAL", "shares_outstanding": s,
-                     "price": p, "shares_source": "aum_implied"})
-    # ECHO: AUM frozen at 100M the whole time -> implied shares = 100M / price.
-    for d, p in zip(dates, px):
-        rows.append({"date": d.date().isoformat(), "ticker": "ECHO", "shares_outstanding": 100e6 / p,
-                     "price": p, "shares_source": "aum_implied"})
-    # LAPSED: real for 20 sessions, then AUM freezes for the last 10.
-    frozen_aum = None
-    for i, (d, p, s) in enumerate(zip(dates, px, sh)):
-        if i < 20:
-            shares = s
-        else:
-            frozen_aum = frozen_aum or sh[19] * px[19]
-            shares = frozen_aum / p
-        rows.append({"date": d.date().isoformat(), "ticker": "LAPSED", "shares_outstanding": shares,
-                     "price": p, "shares_source": "aum_implied"})
-    # ISSUER: direct share counts, static then one creation.
-    for i, (d, p) in enumerate(zip(dates, px)):
-        rows.append({"date": d.date().isoformat(), "ticker": "ISSUER",
-                     "shares_outstanding": 5e6 if i < 15 else 5.2e6, "price": p,
-                     "shares_source": "issuer_spdr"})
-    store = os.path.join(tempfile.mkdtemp(), "hist.csv")
-    pd.DataFrame(rows).to_csv(store, index=False)
-    hist = load_history(store)
-    q = {tk: ticker_quality(g) for tk, g in hist.groupby("ticker")}
-
-    if not q["REAL"]["trustworthy"]:
-        f.append(f"REAL should be trustworthy: {q['REAL']}")
-    if q["ECHO"]["trustworthy"] or not q["ECHO"]["artifact"]:
-        f.append(f"ECHO (frozen AUM) must be an artifact: {q['ECHO']}")
-    if q["LAPSED"]["trustworthy"]:
-        f.append(f"LAPSED (froze 10 of last 20 sessions... ) should fail the recent-update test: {q['LAPSED']}")
-    if not q["ISSUER"]["trustworthy"]:
-        f.append("issuer source with a real creation must be trustworthy")
-
-    fl = compute_flows(store)
-    echo = fl[fl["ticker"] == "ECHO"]
-    if echo["net_flow"].notna().any():
-        f.append("frozen-AUM rows must carry NaN flow, never a number")
-    real = fl[fl["ticker"] == "REAL"]
-    if not (real["net_flow"].dropna() > 0).all():
-        f.append("REAL inflows must be positive every day")
-
-    div = flow_vs_price_divergence(store, window=20)
-    v = dict(zip(div["ticker"], div["verdict"]))
-    if not str(v.get("ECHO", "")).startswith("UNRELIABLE"):
-        f.append(f"ECHO divergence must read UNRELIABLE: {v.get('ECHO')}")
-    if str(v.get("REAL", "")).startswith("UNRELIABLE"):
-        f.append(f"REAL divergence must produce a verdict: {v.get('REAL')}")
-    if bool(div.loc[div["ticker"] == "ECHO", "divergence"].any()):
-        f.append("an unreliable ticker must never be flagged as a divergence")
-    return {"ok": not f, "failures": f,
-            "quality": {k: (x["trustworthy"], x["aum_update_rate"], x["price_mirror_corr"]) for k, x in q.items()}}
-
-
-if __name__ == "__main__":
-    import json
-    print(json.dumps(selftest(), indent=2, default=str))

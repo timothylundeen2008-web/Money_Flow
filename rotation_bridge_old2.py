@@ -104,10 +104,7 @@ def publish_summary(sector_df: pd.DataFrame | None = None,
     if cot_table is not None and not cot_table.empty:
         t = cot_table.reset_index() if cot_table.index.name else cot_table
         keep = [c for c in t.columns
-                if c in ("contract", "sleeve", "report_date", "flag",
-                         # Sept 2026: publish staleness so consumers can't
-                         # read a 2022 report as current positioning.
-                         "age_days", "stale", "matched_by")
+                if c in ("contract", "sleeve", "report_date", "flag")
                 or c.endswith(("_pctile", "_net", "_net_pct_oi"))]
         payload["cot"] = t[keep].to_dict("records")
 

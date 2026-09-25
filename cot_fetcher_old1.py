@@ -82,50 +82,18 @@ LEGACY_FIELDS = {
     "open_interest": "open_interest_all",
 }
 
-CODE_FIELD = "cftc_contract_market_code"
-
-# v2, Sept 2026 — match on the CFTC CONTRACT CODE, not the market name.
-# The CFTC renamed several markets in Feb 2022 (e.g. "10-YEAR U.S. TREASURY
-# NOTES" became "UST 10Y NOTE"). Matching by name silently returned the last
-# row filed under the OLD name — so UST10Y, UST30Y, UST2Y, DXY and WTI all
-# showed report_date 2022-02-01 for 4.5 years, with percentiles and "crowded"
-# flags computed on 2019-2022 data and presented as current.
-#
-# Resolution order per contract: the code first; then every known name
-# (current, then legacy). Whichever query returns the MOST RECENT report wins,
-# so a wrong code or a future rename degrades to the freshest match rather
-# than to an old one. A result older than STALE_AFTER_DAYS is still returned
-# but marked stale, and its flags are suppressed.
-#
-# Code 043602 (UST 10Y) is verified against a public COT mirror; the others
-# are the standard CFTC codes — confirm with verify_contracts() after deploy.
+# Contract names as they appear in market_and_exchange_names.
+# Financials → TFF; physical commodities → Legacy.
 CONTRACTS = {
-    "SP500":  {"kind": "tff",    "code": "13874A",
-               "names": ["E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE"]},
-    "UST10Y": {"kind": "tff",    "code": "043602",
-               "names": ["UST 10Y NOTE - CHICAGO BOARD OF TRADE",
-                         "10-YEAR U.S. TREASURY NOTES - CHICAGO BOARD OF TRADE"]},
-    "UST30Y": {"kind": "tff",    "code": "020601",
-               "names": ["UST BOND - CHICAGO BOARD OF TRADE",
-                         "U.S. TREASURY BONDS - CHICAGO BOARD OF TRADE"]},
-    "UST2Y":  {"kind": "tff",    "code": "042601",
-               "names": ["UST 2Y NOTE - CHICAGO BOARD OF TRADE",
-                         "2-YEAR U.S. TREASURY NOTES - CHICAGO BOARD OF TRADE"]},
-    "DXY":    {"kind": "tff",    "code": "098662",
-               "names": ["USD INDEX - ICE FUTURES U.S.",
-                         "U.S. DOLLAR INDEX - ICE FUTURES U.S."]},
-    "GOLD":   {"kind": "legacy", "code": "088691",
-               "names": ["GOLD - COMMODITY EXCHANGE INC."]},
-    "SILVER": {"kind": "legacy", "code": "084691",
-               "names": ["SILVER - COMMODITY EXCHANGE INC."]},
-    "WTI":    {"kind": "legacy", "code": "067651",
-               "names": ["WTI-PHYSICAL - NEW YORK MERCANTILE EXCHANGE",
-                         "CRUDE OIL, LIGHT SWEET - NEW YORK MERCANTILE EXCHANGE"]},
+    "SP500":  ("E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE",            "tff"),
+    "UST10Y": ("10-YEAR U.S. TREASURY NOTES - CHICAGO BOARD OF TRADE",    "tff"),
+    "UST30Y": ("U.S. TREASURY BONDS - CHICAGO BOARD OF TRADE",            "tff"),
+    "UST2Y":  ("2-YEAR U.S. TREASURY NOTES - CHICAGO BOARD OF TRADE",     "tff"),
+    "DXY":    ("U.S. DOLLAR INDEX - ICE FUTURES U.S.",                    "tff"),
+    "GOLD":   ("GOLD - COMMODITY EXCHANGE INC.",                          "legacy"),
+    "SILVER": ("SILVER - COMMODITY EXCHANGE INC.",                        "legacy"),
+    "WTI":    ("CRUDE OIL, LIGHT SWEET - NEW YORK MERCANTILE EXCHANGE",   "legacy"),
 }
-
-# COT is released weekly (Tuesday data, Friday publish). Anything older than
-# two report cycles is not "the current positioning".
-STALE_AFTER_DAYS = 14
 
 # Which portfolio sleeve each contract informs — used by the weekly review.
 SLEEVE_MAP = {
@@ -139,12 +107,11 @@ _HEADERS = {"User-Agent": "AllWeatherDashboard/1.0 (research; contact via repo)"
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
 
-def _get(dataset: str, contract: str, limit: int = 200, field: str = NAME_FIELD) -> pd.DataFrame:
-    """One Socrata query. Returns empty DataFrame on any failure — never raises.
-    `field` selects the match column: market name (default) or contract code."""
+def _get(dataset: str, contract: str, limit: int = 200) -> pd.DataFrame:
+    """One Socrata query. Returns empty DataFrame on any failure — never raises."""
     url = f"{SOCRATA_BASE}/{dataset}.json"
     params = {
-        "$where": f"{field}='{contract}'",
+        "$where": f"{NAME_FIELD}='{contract}'",
         "$order": f"{DATE_FIELD} DESC",
         "$limit": limit,
     }
@@ -161,40 +128,6 @@ def _get(dataset: str, contract: str, limit: int = 200, field: str = NAME_FIELD)
     except Exception as e:
         print(f"[cot] fetch failed for {contract}: {type(e).__name__}: {e}")
         return pd.DataFrame()
-
-
-def _resolve(key: str, limit: int, getter=None) -> tuple[pd.DataFrame, str]:
-    """Fetch a contract by code, then by each known name; keep the freshest.
-
-    Returns (frame, matched_by). `getter` is injectable for the selftest."""
-    getter = getter or _get
-    spec = CONTRACTS[key]
-    ds = TFF_DATASET if spec["kind"] == "tff" else LEGACY_DATASET
-    attempts = [(CODE_FIELD, spec["code"])] + [(NAME_FIELD, n) for n in spec["names"]]
-    best, best_by = pd.DataFrame(), ""
-    for field, value in attempts:
-        df = getter(ds, value, limit, field)
-        if df is None or df.empty:
-            continue
-        if best.empty or df.index.max() > best.index.max():
-            best, best_by = df, f"{'code' if field == CODE_FIELD else 'name'}={value}"
-        if field == CODE_FIELD and (pd.Timestamp.now() - df.index.max()).days <= STALE_AFTER_DAYS:
-            break            # the code resolved to fresh data; no need to try names
-    return best, best_by
-
-
-def verify_contracts() -> dict:
-    """Run once after deployment: which lookup each contract resolved by, and
-    its latest report date. Any contract resolving only by a legacy name, or
-    showing a stale date, needs its code/name list corrected."""
-    out = {}
-    for key in CONTRACTS:
-        df, by = _resolve(key, limit=1)
-        last = df.index.max().date().isoformat() if not df.empty else None
-        age = (pd.Timestamp.now() - df.index.max()).days if not df.empty else None
-        out[key] = {"matched_by": by or "NOTHING", "report_date": last, "age_days": age,
-                    "ok": bool(age is not None and age <= STALE_AFTER_DAYS)}
-    return out
 
 
 def verify_schema() -> dict:
@@ -229,7 +162,7 @@ def _pct_rank(series: pd.Series, value: float) -> float:
     return round(float((s < value).mean() * 100), 1)
 
 
-def contract_positioning(key: str, years: int = 3, getter=None) -> dict:
+def contract_positioning(key: str, years: int = 3) -> dict:
     """
     Net positioning plus percentile rank for one contract.
 
@@ -240,11 +173,11 @@ def contract_positioning(key: str, years: int = 3, getter=None) -> dict:
     """
     if key not in CONTRACTS:
         return {"contract": key, "available": False, "reason": "unknown contract"}
-    kind = CONTRACTS[key]["kind"]
+    name, kind = CONTRACTS[key]
     weeks = years * 52
-    df, matched_by = _resolve(key, limit=weeks, getter=getter)
+    df = _get(TFF_DATASET if kind == "tff" else LEGACY_DATASET, name, limit=weeks)
     if df.empty:
-        return {"contract": key, "available": False, "reason": "no data (code and all known names empty)"}
+        return {"contract": key, "available": False, "reason": "no data"}
 
     fields = TFF_FIELDS if kind == "tff" else LEGACY_FIELDS
     missing = [v for v in fields.values() if v not in df.columns]
@@ -255,12 +188,9 @@ def contract_positioning(key: str, years: int = 3, getter=None) -> dict:
     num = df[list(fields.values())].apply(pd.to_numeric, errors="coerce")
     oi = num[fields["open_interest"]].replace(0, np.nan)
 
-    age = int((pd.Timestamp.now() - df.index[-1]).days)
     out = {"contract": key, "available": True, "kind": kind,
            "sleeve": SLEEVE_MAP.get(key, ""),
            "report_date": df.index[-1].date().isoformat(),
-           "age_days": age, "stale": age > STALE_AFTER_DAYS,
-           "matched_by": matched_by,
            "weeks_history": len(df)}
 
     if kind == "tff":
@@ -280,12 +210,7 @@ def contract_positioning(key: str, years: int = 3, getter=None) -> dict:
         out[f"{label}_chg_4w"] = (int(net.iloc[-1] - net.iloc[-5])
                                   if len(net) >= 5 and pd.notna(net.iloc[-5]) else None)
 
-    if out["stale"]:
-        # Never present an old report's extremes as today's positioning.
-        out["flag"] = (f"STALE — latest report {out['report_date']} ({age}d old); "
-                       f"positioning not current, flags suppressed")
-    else:
-        out["flag"] = _positioning_flag(out, pairs[0][0], pairs[1][0])
+    out["flag"] = _positioning_flag(out, pairs[0][0], pairs[1][0])
     return out
 
 
@@ -328,63 +253,3 @@ def build_cot_table(years: int = 3) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame(rows).set_index("contract")
-
-
-# ── Selftest (offline: synthetic Socrata frames, no network) ─────────────────
-
-def selftest() -> dict:
-    f = []
-    now = pd.Timestamp.now().normalize()
-
-    def frame(end: pd.Timestamp, kind: str, weeks: int = 156) -> pd.DataFrame:
-        idx = pd.date_range(end=end, periods=weeks, freq="7D")
-        rng = np.random.default_rng(0)
-        cols = TFF_FIELDS if kind == "tff" else LEGACY_FIELDS
-        data = {v: rng.integers(10_000, 200_000, len(idx)).astype(str) for v in cols.values()}
-        data[cols["open_interest"]] = np.full(len(idx), "900000")
-        return pd.DataFrame(data, index=idx)
-
-    fresh, old = now - pd.Timedelta(days=3), pd.Timestamp("2022-02-01")
-
-    # Case 1: code returns fresh data, legacy name returns the frozen 2022 series.
-    def g1(ds, value, limit, field):
-        if field == CODE_FIELD and value == "043602":
-            return frame(fresh, "tff")
-        if field == NAME_FIELD and value.startswith("10-YEAR"):
-            return frame(old, "tff")
-        return pd.DataFrame()
-    r = contract_positioning("UST10Y", getter=g1)
-    if not r.get("available") or r.get("stale") or not r["matched_by"].startswith("code="):
-        f.append(f"fresh code match must win over the frozen legacy name: {r}")
-
-    # Case 2: code empty, only the new name works -> resolved by name, fresh.
-    def g2(ds, value, limit, field):
-        return frame(fresh, "tff") if value == "UST 10Y NOTE - CHICAGO BOARD OF TRADE" else pd.DataFrame()
-    r = contract_positioning("UST10Y", getter=g2)
-    if r.get("stale") or "UST 10Y NOTE" not in r.get("matched_by", ""):
-        f.append(f"new-name fallback must resolve fresh: {r}")
-
-    # Case 3: only the legacy name answers -> returned, but STALE with flags suppressed.
-    def g3(ds, value, limit, field):
-        return frame(old, "tff") if value.startswith("10-YEAR") else pd.DataFrame()
-    r = contract_positioning("UST10Y", getter=g3)
-    if not r.get("stale") or not str(r.get("flag", "")).startswith("STALE"):
-        f.append(f"a 2022 report must be marked STALE, never flagged as current: {r}")
-    if "crowded" in str(r.get("flag", "")):
-        f.append("stale rows must not carry crowded/divergence flags")
-
-    # Case 4: nothing answers -> unavailable, named.
-    r = contract_positioning("UST10Y", getter=lambda *a: pd.DataFrame())
-    if r.get("available"):
-        f.append("no data must be unavailable")
-
-    # Every contract carries a code and at least one name.
-    for k, spec in CONTRACTS.items():
-        if not spec.get("code") or not spec.get("names") or spec.get("kind") not in ("tff", "legacy"):
-            f.append(f"malformed contract spec: {k}")
-    return {"ok": not f, "failures": f}
-
-
-if __name__ == "__main__":
-    import json
-    print(json.dumps(selftest(), indent=2, default=str))

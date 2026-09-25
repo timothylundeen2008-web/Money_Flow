@@ -200,10 +200,6 @@ def run_daily(fred_key: str = "", force: bool = False) -> dict:
     def _context():
         import market_context as mc
         ctx = mc.snapshot()
-        # Sept 2026: snapshot() names its own gaps (stale bar, missing
-        # tickers) but they never reached the log's errors field, so a
-        # Monday row repeating Friday's tape read as clean.
-        errors.extend(f"Market context: {e}" for e in ctx.get("errors", []))
         spy = ctx.get("indices", {}).get("SPY", {})
         qqq = ctx.get("indices", {}).get("QQQ", {})
         return {"_ctx": ctx,

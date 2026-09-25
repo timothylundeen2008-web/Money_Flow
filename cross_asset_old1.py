@@ -239,14 +239,10 @@ def divergence(hy_oas=None, hy_mom_2w=None,
     severity = ("HIGH" if weight >= 0.9 else
                 "MODERATE" if weight >= 0.7 else "LOW")
 
-    # Built on its own line: reusing quotes inside a nested f-string is only
-    # legal on Python 3.12+, and the scheduled workflows ran 3.11 -- this
-    # module failed to import in every automated log from at least 2026-08-30.
-    dissent_str = ", ".join("%s (%s)" % (d, lanes[d]["state"]) for d in dissenters)
     out["flag"] = (
         f"DIVERGENCE ({severity}): {len(known) - len(dissenters)} of "
         f"{len(known)} lanes read {majority}, but "
-        f"{dissent_str} "
+        f"{', '.join(f'{d} ({lanes[d]['state']})' for d in dissenters)} "
         f"disagree. Highest-weight dissenter is {worst.upper()}. "
         f"{LANE_LEAD.get(worst, '')}"
     )

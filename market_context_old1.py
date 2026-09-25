@@ -87,25 +87,9 @@ ALERT_RULES = {
 }
 
 
-def expected_last_bar(now=None):
-    """The session whose close a post-close fetch SHOULD contain.
-
-    Today once 30+ minutes past the close on a trading day; otherwise the
-    most recent trading day before today."""
-    from datetime import timedelta
-    d = mt.et_date(now) if now else mt.et_date()
-    msc = mt.minutes_since_close(now) if now else mt.minutes_since_close()
-    if mt.is_trading_day(d) and msc is not None and msc >= 30:
-        return d
-    return mt.last_trading_day(d - timedelta(days=1))
-
-
-def _fetch(tickers: list[str], period: str = "6mo"):
+def _fetch(tickers: list[str], period: str = "3mo"):
     """Adjusted closes for a ticker list. Returns None on any failure —
-    never a partial frame silently treated as complete.
-
-    Sept 2026: default period 3mo -> 6mo. '3mo' returns ~62 rows and the 3M
-    column needs 64 (63 returns + 1), so it had read n/a since 2026-09-13."""
+    never a partial frame silently treated as complete."""
     try:
         import yfinance as yf
         df = yf.download(tickers, period=period, progress=False,
@@ -141,24 +125,6 @@ def snapshot() -> dict:
     if df is None or df.empty:
         out["errors"].append("price fetch returned nothing")
         return out
-
-    # Stale-bar guard (Sept 2026). On 9/14 and 9/21 the Monday evening fetch
-    # ended at Friday -- the Monday row came back all-NaN and dropna(how="all")
-    # removed it -- so Monday's log repeated Friday's 1D/1W numbers as if
-    # they were new. Name it instead of printing it as today's tape.
-    try:
-        last_bar = df.index[-1].date() if hasattr(df.index[-1], "date") else None
-        exp = expected_last_bar()
-        out["last_bar"] = last_bar.isoformat() if last_bar else None
-        out["expected_bar"] = exp.isoformat()
-        if last_bar is not None and last_bar < exp:
-            out["stale_bar"] = True
-            out["errors"].append(f"price data STALE: last bar {last_bar} but expected {exp} — "
-                                 f"1D/1W figures describe {last_bar}, not today")
-        else:
-            out["stale_bar"] = False
-    except Exception as e:
-        out["errors"].append(f"stale-bar check failed: {e}")
 
     for group, universe in (("indices", INDICES), ("sectors", SECTORS),
                             ("cross_asset", CROSS_ASSET)):
@@ -394,24 +360,6 @@ def selftest() -> dict:
     band = dict(calm_sig, short_real_rate=0.48)
     if not any(a["rule"] == "short_real_band" for a in alerts(calm_ctx, band)):
         failures.append("Band crossing not detected")
-
-    # Sept 2026: expected-bar logic. Monday 8:59pm ET expects Monday's bar;
-    # Monday 10am (pre-close) and Sunday both expect Friday's.
-    from datetime import datetime as _dt, date as _d
-    _et = mt.ET
-    cases = [(_dt(2026, 9, 21, 20, 59, tzinfo=_et), _d(2026, 9, 21)),
-             (_dt(2026, 9, 21, 10, 0, tzinfo=_et), _d(2026, 9, 18)),
-             (_dt(2026, 9, 20, 10, 0, tzinfo=_et), _d(2026, 9, 18))]
-    for now, want in cases:
-        got_bar = expected_last_bar(now)
-        if got_bar != want:
-            failures.append(f"expected_last_bar({now}) = {got_bar}, want {want}")
-
-    # 3M window: a 6-month daily series must yield a d63 value.
-    import pandas as _pd
-    s = _pd.Series(range(1, 127), index=_pd.bdate_range("2026-03-20", periods=126), dtype=float)
-    if _pct(s, 63) is None:
-        failures.append("6mo series (126 bars) must produce a 3M return")
 
     return {"ok": not failures, "failures": failures,
             "calm_day_alerts": len(alerts(calm_ctx, calm_sig)),
