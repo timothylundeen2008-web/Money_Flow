@@ -95,10 +95,6 @@ DEFAULT_STORE = os.environ.get("ETF_FLOW_STORE", "data/etf_shares_history.csv")
 # failed, in the same place it already shows verification status — no trip
 # to "Manage app" logs required.
 _RUN_ERRORS: dict[str, list[str]] = {}
-# ticker -> ISO date the issuer says its share count is "as of". Issuer rows
-# are stored under THAT date (not the poll date), so flows line up with the
-# day creations/redemptions actually settled.
-_LAST_ASOF: dict[str, str] = {}
 
 
 def _log_error(ticker: str, source: str, exc: Exception) -> None:
@@ -160,37 +156,10 @@ TRACKED = [
 ]
 
 # ── Issuer routing table ────────────────────────────────────────────────────
-# v4, Sept 2026 — issuer sources rebuilt against endpoints VERIFIED live on
-# 2026-09-25 (the v3 URLs were guesses and 404'd, which is why aum_implied
-# became primary and the flow layer froze when yfinance totalAssets stopped
-# updating around 2026-09-07).
-#
-#  SPDR  : SSGA's NAV-history workbook, one per fund —
-#          https://www.ssga.com/library-content/products/fund-data/etfs/us/navhist-us-en-{t}.xlsx
-#          Daily Date / NAV / Shares Outstanding history. Also used by
-#          backfill_issuer_history() to seed real history immediately.
-#  iShares: the product page (https://www.ishares.com/us/products/{id}/),
-#          which prints "Shares Outstanding N as of Mon DD, YYYY". IDs below
-#          were each confirmed to resolve to the named fund. ITA was
-#          previously routed to SPDR in error — it is an iShares fund (ID not
-#          yet verified, so it stays on the fallback path for now).
 ISSUER_SPDR = {"XLK", "XLF", "XLI", "XLY", "XLRE", "XLB", "XLC", "XLP",
-               "XLE", "XLV", "XLU", "KRE", "KBE", "XOP", "XBI", "XRT",
-               "XHB", "XTN", "MDY"}
+               "XLE", "XLV", "XLU", "KRE", "XOP", "ITA"}
 ISSUER_SPDR_GOLD = {"GLD"}
-ISHARES_IDS = {
-    "IWM": 239710, "TLT": 239454, "HYG": 239565, "EEM": 239637,
-    "IBB": 239699, "SOXX": 239705, "EFA": 239623, "LQD": 239566,
-    "EMB": 239572, "IWO": 239709, "IGV": 239771, "IHI": 239516,
-    "TIP": 239467, "EWJ": 239665, "FXI": 239536,
-}
-ISSUER_ISHARES = set(ISHARES_IDS)
-SSGA_NAVHIST_URL = ("https://www.ssga.com/library-content/products/fund-data/"
-                    "etfs/us/navhist-us-en-{t}.xlsx")
-ISHARES_PAGE_URL = "https://www.ishares.com/us/products/{id}/"
-ISSUER_MAX_AGE_DAYS = 6          # an issuer figure older than this is stale
-_UA = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36")}
+ISSUER_ISHARES = {"SLV", "RING", "SGOV", "TLT", "IBB", "IWM", "HYG", "EEM"}
 
 IMPLAUSIBLE_DAILY_FLOW_PCT = 0.15
 CROSS_CHECK_DIVERGENCE_PCT = 0.05
@@ -198,71 +167,39 @@ CROSS_CHECK_DIVERGENCE_PCT = 0.05
 
 # ── Individual source implementations ───────────────────────────────────────
 
-def parse_ssga_navhist(raw: bytes) -> pd.DataFrame:
-    """Parse an SSGA NAV-history workbook into date / nav / shares_outstanding.
-
-    Tolerant of the header block SSGA puts above the table: finds the row
-    that contains a 'Shares Outstanding' cell and uses it as the header.
-    Raises ValueError with a specific message if the layout is unrecognised."""
-    import io
-    grid = pd.read_excel(io.BytesIO(raw), header=None)
-    hdr_idx = None
-    for i in range(min(len(grid), 40)):
-        cells = [str(c).strip().lower() for c in grid.iloc[i].tolist()]
-        if any("shares outstanding" in c for c in cells):
-            hdr_idx = i
-            break
-    if hdr_idx is None:
-        raise ValueError("no 'Shares Outstanding' header in the first 40 rows")
-    df = grid.iloc[hdr_idx + 1:].copy()
-    df.columns = [str(c).strip() for c in grid.iloc[hdr_idx].tolist()]
-    low = {c: c.lower() for c in df.columns}
-    date_c = next((c for c, l in low.items() if l == "date" or l.startswith("date")), None)
-    sh_c = next((c for c, l in low.items() if "shares outstanding" in l), None)
-    nav_c = next((c for c, l in low.items() if l == "nav" or l.startswith("nav")), None)
-    if not date_c or not sh_c:
-        raise ValueError(f"missing Date/Shares columns (got {list(df.columns)[:8]})")
-    out = pd.DataFrame({
-        "date": pd.to_datetime(df[date_c], errors="coerce"),
-        "shares_outstanding": pd.to_numeric(
-            df[sh_c].astype(str).str.replace(",", "", regex=False), errors="coerce"),
-        "nav": pd.to_numeric(df[nav_c], errors="coerce") if nav_c else np.nan,
-    }).dropna(subset=["date", "shares_outstanding"])
-    out = out[out["shares_outstanding"] > 0]
-    return out.sort_values("date").drop_duplicates("date", keep="last").reset_index(drop=True)
-
-
-def _ssga_navhist(ticker: str) -> pd.DataFrame | None:
+def _shares_from_spdr(ticker: str) -> tuple[float | None, float | None]:
+    """
+    State Street's daily per-fund data file. Covers 14 of 31 tracked tickers
+    — the single highest-leverage source in this module. UNVERIFIED against
+    the live endpoint — SSGA has changed this site's structure before and
+    may again; confirm on first real run.
+    """
     try:
         import requests
-        r = requests.get(SSGA_NAVHIST_URL.format(t=ticker.lower()), timeout=30, headers=_UA)
+        # v3: the /us/en/individual/etfs/ prefix 404'd via a server redirect
+        # to this shorter path (confirmed from the actual captured error on
+        # XLE's first live run) -- trying the redirect target directly.
+        # Still unverified whether the FILE exists at this path; only the
+        # path PREFIX is corrected from real evidence.
+        url = (f"https://www.ssga.com/library-content/"
+              f"products/fund-data/etfs/us/fund-data-{ticker.lower()}-us-en.json")
+        r = requests.get(url, timeout=15,
+                         headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
-        return parse_ssga_navhist(r.content)
+        data = r.json()
+        shares = (data.get("sharesOutstanding") or data.get("fundShares")
+                  or data.get("shares_outstanding"))
+        price = (data.get("nav") or data.get("navPrice")
+                 or data.get("closePrice"))
+        if shares and price:
+            return float(shares), float(price)
+        _log_error(ticker, "spdr", RuntimeError(
+            f"response parsed but no shares/price found in expected keys "
+            f"(got keys: {list(data.keys())[:8]})"))
+        return None, None
     except Exception as e:
         _log_error(ticker, "spdr", e)
-        return None
-
-
-def _fresh(asof, ticker: str, source: str) -> bool:
-    age = (pd.Timestamp.now().normalize() - pd.Timestamp(asof).normalize()).days
-    if age > ISSUER_MAX_AGE_DAYS:
-        _log_error(ticker, source, RuntimeError(f"issuer figure is stale: as of {pd.Timestamp(asof).date()} ({age}d)"))
-        return False
-    return True
-
-
-def _shares_from_spdr(ticker: str) -> tuple[float | None, float | None]:
-    """Latest reported shares outstanding + NAV from SSGA's NAV-history file.
-    Sets _LAST_ASOF[ticker] to the file's own date for that figure."""
-    h = _ssga_navhist(ticker)
-    if h is None or h.empty:
         return None, None
-    last = h.iloc[-1]
-    if not _fresh(last["date"], ticker, "spdr"):
-        return None, None
-    _LAST_ASOF[ticker] = last["date"].date().isoformat()
-    nav = float(last["nav"]) if pd.notna(last["nav"]) else None
-    return float(last["shares_outstanding"]), nav
 
 
 def _shares_from_spdr_gold(ticker: str) -> tuple[float | None, float | None]:
@@ -292,51 +229,31 @@ def _shares_from_spdr_gold(ticker: str) -> tuple[float | None, float | None]:
         return None, None
 
 
-_ISH_NUM = r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?)"
-_ISH_DATE = r"as of\s*([A-Z][a-z]{2,8}\.?\s+\d{1,2},\s+\d{4})"
-
-
-def parse_ishares_page(html: str, ticker: str) -> tuple[float, str]:
-    """Extract (shares_outstanding, as_of_iso) from an iShares product page.
-
-    Verifies the page is for `ticker` (IDs can be wrong or reassigned) and
-    raises ValueError with a specific reason otherwise."""
-    import re
-    title = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
-    head = (title.group(1) if title else html[:5000])
-    if not re.search(rf"\b{re.escape(ticker)}\b", head):
-        raise ValueError(f"page is not for {ticker} (title: {head.strip()[:80]!r})")
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"\s+", " ", text)
-    i = text.lower().find("shares outstanding")
-    if i < 0:
-        raise ValueError("no 'Shares Outstanding' on page")
-    window = text[i:i + 400]
-    num = re.search(_ISH_NUM, window)
-    dt = re.search(_ISH_DATE, window)
-    if not num:
-        raise ValueError(f"no share count near 'Shares Outstanding': {window[:120]!r}")
-    asof = pd.to_datetime(dt.group(1).replace(".", ""), errors="coerce") if dt else pd.NaT
-    if pd.isna(asof):
-        raise ValueError("no as-of date near 'Shares Outstanding'")
-    return float(num.group(1).replace(",", "")), asof.date().isoformat()
-
-
 def _shares_from_ishares(ticker: str) -> tuple[float | None, float | None]:
-    """Reported shares outstanding from the iShares product page. Price is
-    left to the caller (yfinance close); flows only need Δshares × price."""
-    pid = ISHARES_IDS.get(ticker)
-    if pid is None:
-        return None, None
+    """
+    BlackRock iShares daily fund data. Covers 8 more tracked tickers.
+    UNVERIFIED against the live endpoint — iShares' fund IDs are numeric,
+    not ticker-based, so this tries their ticker-search API first; confirm
+    it resolves correctly on first real run.
+    """
     try:
         import requests
-        r = requests.get(ISHARES_PAGE_URL.format(id=pid), timeout=30, headers=_UA)
+        search_url = f"https://www.ishares.com/us/product-screener/product-screener-v3.jsn?tickers={ticker}"
+        r = requests.get(search_url, timeout=15,
+                         headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
-        shares, asof = parse_ishares_page(r.text, ticker)
-        if not _fresh(asof, ticker, "ishares"):
+        data = r.json()
+        rows = data.get("data", {}).get("tableData", {}).get("data", [])
+        if not rows:
             return None, None
-        _LAST_ASOF[ticker] = asof
-        return shares, None
+        row = rows[0]
+        shares = row.get("sharesOutstanding")
+        price = row.get("navAmount") or row.get("closePrice")
+        if shares and price:
+            return float(shares), float(price)
+        _log_error(ticker, "ishares", RuntimeError(
+            f"response parsed but no matching row/shares found"))
+        return None, None
     except Exception as e:
         _log_error(ticker, "ishares", e)
         return None, None
@@ -428,25 +345,24 @@ def _snapshot_one(ticker: str) -> dict | None:
     """
     shares = price = None
     used = None
-    row_date = datetime.now().date().isoformat()
-    _LAST_ASOF.pop(ticker, None)
 
-    # v4 ORDER, Sept 2026: issuer FIRST again, now that the issuer endpoints
-    # are verified. aum_implied is the fallback — and flow_integrity treats it
-    # as untrustworthy unless its AUM demonstrably updates.
-    primary = _issuer_source_for(ticker)
-    if primary is not None:
-        s, p = primary(ticker)
-        if s:
-            shares, price = s, p
-            used = "issuer_" + primary.__name__.replace("_shares_from_", "")
-            row_date = _LAST_ASOF.get(ticker, row_date)
-
-    # aum_implied is always fetched: primary when no issuer answered, and a
-    # cross-check when one did.
+    # v3 REORDER, Sept 2026: aum_implied tried FIRST. The first real run
+    # against live data confirmed it (20/31 tickers moving) while every
+    # issuer-direct guess so far returned 404/500 -- see the specific
+    # errors captured in load_last_run_errors(). Empirical evidence beats
+    # a plausible-sounding guess; issuer-direct stays as a second attempt
+    # in case a fix lands or a vendor's site changes, but no longer gates
+    # the primary path.
     aum_shares, aum_price = _shares_from_aum_implied(ticker)
-    if shares is None and aum_shares:
+    if aum_shares:
         shares, price, used = aum_shares, aum_price, "aum_implied"
+
+    if shares is None:
+        primary = _issuer_source_for(ticker)
+        if primary is not None:
+            s, p = primary(ticker)
+            if s and p:
+                shares, price, used = s, p, primary.__name__.replace("_shares_from_", "")
 
     if shares is None:
         s, p = _shares_from_yfinance(ticker)
@@ -454,15 +370,13 @@ def _snapshot_one(ticker: str) -> dict | None:
             shares, price, used = s, p, "yfinance"
 
     if not price:
-        price = aum_price
-    if not price:
         _, p = _shares_from_yfinance(ticker)
         price = price or p
 
     if not shares or not price:
         return None
 
-    row = {"date": row_date, "ticker": ticker,
+    row = {"date": datetime.now().date().isoformat(), "ticker": ticker,
            "shares_outstanding": float(shares), "price": float(price),
            "shares_source": used or "unknown"}
 
@@ -475,57 +389,6 @@ def _snapshot_one(ticker: str) -> dict | None:
                  f"{divergence*100:.1f}% — worth a manual look.")
 
     return row
-
-
-def _upsert(store: str, new: pd.DataFrame) -> pd.DataFrame:
-    """Write rows keyed on (ticker, date); new rows replace old ones.
-    v4: rows can carry different dates (issuer as-of dates vs poll date),
-    so replacement is per (ticker, date) pair, not 'today' only."""
-    os.makedirs(os.path.dirname(store) or ".", exist_ok=True)
-    new = new.copy()
-    new["date"] = new["date"].astype(str)
-    if os.path.exists(store):
-        hist = pd.read_csv(store)
-        hist["date"] = hist["date"].astype(str)
-        keys = set(zip(new["ticker"], new["date"]))
-        hist = hist[[(t, d) not in keys for t, d in zip(hist["ticker"], hist["date"])]]
-        out = pd.concat([hist, new], ignore_index=True)
-    else:
-        out = new
-    out = out.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last")
-    out.to_csv(store, index=False)
-    return out
-
-
-def backfill_issuer_history(tickers: list[str] | None = None, days: int = 90,
-                            store: str = DEFAULT_STORE) -> dict:
-    """Seed the store with REAL reported share history from SSGA's NAV-history
-    files (SPDR funds). Replaces any aum_implied/yfinance rows on the same
-    dates. Idempotent — safe to run on every poll; it also self-heals days
-    the daily poll missed. iShares pages carry only the latest figure, so
-    those tickers build history one poll at a time."""
-    tickers = [t for t in (tickers or TRACKED) if t in ISSUER_SPDR]
-    cutoff = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
-    frames, report = [], {}
-    for tk in tickers:
-        h = _ssga_navhist(tk)
-        if h is None or h.empty:
-            report[tk] = "failed (see errors sidecar)"
-            continue
-        h = h[h["date"] >= cutoff]
-        if h.empty:
-            report[tk] = "no rows in window"
-            continue
-        f = pd.DataFrame({"date": h["date"].dt.date.astype(str), "ticker": tk,
-                          "shares_outstanding": h["shares_outstanding"].astype(float),
-                          "price": h["nav"].astype(float),
-                          "shares_source": "issuer_spdr"})
-        f = f.dropna(subset=["price"])
-        frames.append(f)
-        report[tk] = f"{len(f)} rows, {f['date'].min()} → {f['date'].max()}"
-    if frames:
-        _upsert(store, pd.concat(frames, ignore_index=True))
-    return report
 
 
 def snapshot_all(tickers: list[str] | None = None,
@@ -556,7 +419,16 @@ def snapshot_all(tickers: list[str] | None = None,
     new = pd.DataFrame(rows)
     os.makedirs(os.path.dirname(store) or ".", exist_ok=True)
 
-    out = _upsert(store, new)
+    if os.path.exists(store):
+        hist = pd.read_csv(store)
+        today = new["date"].iloc[0]
+        hist = hist[~((hist["date"] == today) & (hist["ticker"].isin(new["ticker"])))]
+        out = pd.concat([hist, new], ignore_index=True)
+    else:
+        out = new
+
+    out = out.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last")
+    out.to_csv(store, index=False)
 
     sources_used = new["shares_source"].value_counts().to_dict()
     print(f"[etf_flow] stored {len(new)} snapshots; history now {len(out)} rows. "
@@ -621,16 +493,8 @@ def ticker_quality(g: pd.DataFrame, window: int = 20) -> dict:
     g = g.sort_values("date")
     src = g["shares_source"].iloc[-1] if "shares_source" in g.columns and len(g) else None
     if "shares_source" in g.columns and len(g):
-        is_issuer = g["shares_source"].astype(str).str.startswith("issuer")
-        if is_issuer.tail(5).any():
-            # Issuer data present recently: judge on issuer rows only. A
-            # one-day issuer outage (aum fallback that day) must not reset an
-            # otherwise real series.
-            g = g[is_issuer]
-            src = g["shares_source"].iloc[-1]
-        else:
-            run_id = g["shares_source"].ne(g["shares_source"].shift()).cumsum()
-            g = g[run_id == run_id.iloc[-1]]        # current-source tail only
+        run_id = g["shares_source"].ne(g["shares_source"].shift()).cumsum()
+        g = g[run_id == run_id.iloc[-1]]            # current-source tail only
     n = len(g)
     out = {"sessions": n, "source": src, "aum_update_rate": None, "last_update": None,
            "price_mirror_corr": None, "moving": False, "artifact": False,
@@ -708,21 +572,9 @@ def compute_flows(store: str = DEFAULT_STORE) -> pd.DataFrame:
         # Measure share change between consecutive INFORMATIVE rows only
         # (issuer rows, or aum_implied rows where AUM actually updated).
         # Stale rows get NaN: no information, not zero and not a price echo.
-        g = g.reset_index(drop=True)
         informative = ~g["stale_aum"]
-        first_issuer = None
-        if "shares_source" in g.columns:
-            is_issuer = g["shares_source"].astype(str).str.startswith("issuer")
-            if is_issuer.any():
-                # Once issuer data exists, only issuer rows are informative:
-                # an estimate differenced against a reported figure is noise.
-                first_issuer = int(is_issuer.values.argmax())
-                after = pd.Series(np.arange(len(g)) >= first_issuer)
-                informative = informative & ~(after & ~is_issuer)
         d_shares = g["shares_outstanding"].where(informative).ffill().diff()
         d_shares = d_shares.where(informative)
-        if first_issuer is not None:
-            d_shares.iloc[first_issuer] = np.nan   # never diff reported vs estimated
         g["net_flow"] = (d_shares * g["price"]).where(~g["is_split"], np.nan)
 
         g["implausible"] = (g["net_flow"].abs() / g["aum"]) > IMPLAUSIBLE_DAILY_FLOW_PCT
@@ -1023,75 +875,6 @@ def selftest() -> dict:
         f.append(f"REAL divergence must produce a verdict: {v.get('REAL')}")
     if bool(div.loc[div["ticker"] == "ECHO", "divergence"].any()):
         f.append("an unreliable ticker must never be flagged as a divergence")
-
-    # ── v4 issuer parsers ────────────────────────────────────────────────
-    import io
-    grid = [["State Street SPDR", None, None, None],
-            ["Fund Name:", "The Technology Select Sector SPDR Fund", None, None],
-            [None, None, None, None],
-            ["Date", "NAV", "Shares Outstanding", "Total Net Assets"],
-            ["22-Sep-2026", 180.10, "651,000,000", 1.17e11],
-            ["23-Sep-2026", 181.00, "651,260,000", 1.18e11],
-            ["24-Sep-2026", 182.25, "652,510,000", 1.19e11]]
-    buf = io.BytesIO()
-    pd.DataFrame(grid).to_excel(buf, header=False, index=False)
-    try:
-        nh = parse_ssga_navhist(buf.getvalue())
-        if len(nh) != 3 or nh["shares_outstanding"].iloc[-1] != 652_510_000 or nh["date"].iloc[-1].day != 24:
-            f.append(f"SSGA navhist parse wrong: {nh.to_dict('records')}")
-    except Exception as e:
-        f.append(f"SSGA navhist parse raised: {e}")
-    bad = io.BytesIO(); pd.DataFrame([["Date", "NAV"], ["x", 1]]).to_excel(bad, header=False, index=False)
-    try:
-        parse_ssga_navhist(bad.getvalue()); f.append("navhist without a shares column must raise")
-    except ValueError:
-        pass
-
-    html = ("<html><head><title>iShares Russell 2000 ETF | IWM</title></head><body>"
-            "<span class='caption'>Shares Outstanding <span class='as-of-date'>as of Sep 24, 2026</span></span>"
-            "<span class='data'>272,650,000</span></body></html>")
-    try:
-        sh, asof = parse_ishares_page(html, "IWM")
-        if sh != 272_650_000 or asof != "2026-09-24":
-            f.append(f"iShares parse wrong: {sh}, {asof}")
-    except Exception as e:
-        f.append(f"iShares parse raised: {e}")
-    try:
-        parse_ishares_page(html, "TLT"); f.append("iShares page for another fund must be rejected")
-    except ValueError:
-        pass
-
-    # ── issuer rows supersede estimates; a one-day outage doesn't reset them
-    rows2 = []
-    for i, (d, p) in enumerate(zip(dates, px)):
-        if i < 10:       # old aum_implied echo rows
-            rows2.append({"date": d.date().isoformat(), "ticker": "MIX", "shares_outstanding": 100e6 / p,
-                          "price": p, "shares_source": "aum_implied"})
-        elif i == 25:    # issuer outage day -> aum fallback
-            rows2.append({"date": d.date().isoformat(), "ticker": "MIX", "shares_outstanding": 100e6 / p,
-                          "price": p, "shares_source": "aum_implied"})
-        else:            # real reported shares, +1%/day
-            rows2.append({"date": d.date().isoformat(), "ticker": "MIX",
-                          "shares_outstanding": 1e6 * 1.01 ** i, "price": p, "shares_source": "issuer_spdr"})
-    store2 = os.path.join(tempfile.mkdtemp(), "hist.csv")
-    pd.DataFrame(rows2).to_csv(store2, index=False)
-    qm = ticker_quality(load_history(store2))
-    if not qm["trustworthy"]:
-        f.append(f"issuer series with a one-day aum outage must stay trustworthy: {qm}")
-    fm = compute_flows(store2)
-    nf = fm["net_flow"]
-    if nf.iloc[10] == nf.iloc[10] or nf.iloc[25] == nf.iloc[25]:
-        f.append("first issuer row and the outage row must carry NaN flow")
-    if not (nf.iloc[11:25].dropna() > 0).all() or nf.iloc[26:].dropna().le(0).any():
-        f.append("issuer rows must show the real +1%/day inflow, including across the outage")
-
-    # _upsert replaces per (ticker, date) pair
-    s3 = os.path.join(tempfile.mkdtemp(), "h.csv")
-    _upsert(s3, pd.DataFrame([{"date": "2026-09-23", "ticker": "A", "shares_outstanding": 1, "price": 1, "shares_source": "aum_implied"},
-                              {"date": "2026-09-24", "ticker": "A", "shares_outstanding": 1, "price": 1, "shares_source": "aum_implied"}]))
-    out3 = _upsert(s3, pd.DataFrame([{"date": "2026-09-23", "ticker": "A", "shares_outstanding": 5, "price": 1, "shares_source": "issuer_spdr"}]))
-    if len(out3) != 2 or out3.loc[out3["date"] == "2026-09-23", "shares_source"].iloc[0] != "issuer_spdr":
-        f.append(f"_upsert must replace only the matching (ticker, date): {out3.to_dict('records')}")
     return {"ok": not f, "failures": f,
             "quality": {k: (x["trustworthy"], x["aum_update_rate"], x["price_mirror_corr"]) for k, x in q.items()}}
 

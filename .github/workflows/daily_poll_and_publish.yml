@@ -48,7 +48,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance pandas numpy requests streamlit
+          pip install yfinance pandas numpy requests streamlit openpyxl
 
       - name: Verify publish target is configured
         env:
@@ -74,8 +74,22 @@ jobs:
           import sys, traceback
           sys.path.insert(0, ".")
           try:
-              from etf_flow_tracker import snapshot_all, coverage_report
+              from etf_flow_tracker import (snapshot_all, coverage_report,
+                                            backfill_issuer_history, load_last_run_errors)
+              # v4: seed/self-heal REAL reported share history for SPDR funds
+              # from SSGA's NAV-history files before today's snapshot.
+              rep = backfill_issuer_history()
+              for tk, msg in sorted(rep.items()):
+                  print(f"[backfill] {tk}: {msg}")
               snapshot_all()
+              errs = load_last_run_errors().get("errors", {})
+              issuer_errs = {t: e for t, e in errs.items()
+                             if any(s.startswith(("spdr", "ishares")) for s in e)}
+              if issuer_errs:
+                  print(f"::warning::issuer source failed for {len(issuer_errs)} tickers: "
+                        + ", ".join(sorted(issuer_errs)))
+                  for t, e in sorted(issuer_errs.items()):
+                      print(f"  {t}: {e[-1]}")
               print("coverage:", coverage_report().get("message"))
           except Exception:
               traceback.print_exc()

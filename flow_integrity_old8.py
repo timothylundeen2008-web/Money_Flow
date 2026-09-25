@@ -206,11 +206,10 @@ def check_shares_move(store: str = "data/etf_shares_history.csv") -> dict:
             f"divided by a moving price does not count). The poll is working; "
             f"the shares/AUM source is not updating.")
         out["action"] = (
-            "Do NOT read any flow panel until this clears. Run the 'Daily poll "
-            "and publish' workflow: it backfills reported share history for SPDR "
-            "funds from SSGA and polls iShares product pages (see ISSUER_SPDR / "
-            "ISHARES_IDS in etf_flow_tracker). If it stays BROKEN, the workflow "
-            "log's '[backfill]' and 'issuer source failed' lines name the cause.")
+            "Do NOT wait for 20 sessions — the history would be all zeros and "
+            "would render as 'no institutional flows'. Replace the shares "
+            "source (see etf_flow_tracker.SHARES_SOURCES) before collecting "
+            "further.")
         return out
 
     if movers == 0 and price_movers == 0:
