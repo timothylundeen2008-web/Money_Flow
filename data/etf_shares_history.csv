@@ -712,7 +712,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-22,SCHD,3333449260.0593467,33.7,aum_implied,,
 2026-09-23,SCHD,3331472125.266904,33.72,aum_implied,,
 2026-09-24,SCHD,3331472125.266904,33.72,aum_implied,,
-2026-09-25,SCHD,3395926241.354293,33.08,aum_implied,,
+2026-09-25,SCHD,3300150000.0,33.08,issuer_schwab,3395926241.0,2.9
 2026-09-26,SCHD,3395926241.354293,33.08,aum_implied,,
 2026-09-04,SGOV,995543428.8528838,100.39655,aum_implied,,
 2026-09-07,SGOV,1054894875.2484156,100.46165,aum_implied,,
