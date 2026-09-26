@@ -118,12 +118,6 @@ FRED_SERIES = {
     "cpi_index_sa": "CPIAUCSL",
     "real_10y": "DFII10",
     "breakeven_10y": "T10YIE",
-    # v5: the dollar. Added because the framework was structurally blind to
-    # FX -- SignalSet had 14 fields covering rates/credit/curve/inflation and
-    # ZERO covering the currency, so a rising-long-yields/falling-dollar
-    # divergence (the classic term-premium / debt-confidence signature) was
-    # literally unrepresentable in the regime read.
-    "dxy": "DTWEXBGS",          # Broad USD index, daily, FRED
     "nom_10y": "DGS10",
     "nom_2y": "DGS2",
     "hy_oas": "BAMLH0A0HYM2",
@@ -275,109 +269,6 @@ REGIMES = {
             "KMLM": +1,
         },
     },
-    # v5: TERM PREMIUM REPRICING -- structurally the INVERSE of financial
-    # repression, and the state this framework previously could not name.
-    #
-    # Repression is: negative front-end real rates, a SUPPRESSED long end,
-    # savers quietly liquidated. This is the opposite on every axis: savers
-    # PAID a positive real rate at the front end, the long end RISING because
-    # buyers demand more compensation, and the currency WEAKENING even as
-    # yields climb.
-    #
-    # That last part is the whole signal. Higher yields normally ATTRACT
-    # foreign capital and support the currency. When yields rise and the
-    # dollar falls simultaneously, the higher yield is not pricing better
-    # growth or higher expected inflation -- it is pricing the RISK of
-    # holding the paper at all: fiscal sustainability, supply, credibility.
-    # indicators.score_dollar_divergence() has detected exactly this pattern
-    # for some time, but it fed only the Repression Watch scorecard and never
-    # reached this classifier -- the signal existed and the regime engine
-    # could not hear it.
-    #
-    # OVERLAY REASONING:
-    #   TLT -6   Long duration is the DIRECT loser. Term premium expansion is
-    #            precisely a repricing of long-dated paper downward. This is
-    #            the largest single tilt in the overlay for that reason.
-    #   VGT -4, QQQ -2, SMH -1  Long-duration EQUITY. Rising discount rates
-    #            hit the assets whose value sits furthest in the future,
-    #            which is exactly high-multiple growth.
-    #   GLD +4, SLV +2  The classic debasement hedge. Gold's whole case is a
-    #            currency losing credibility while real assets hold it.
-    #   PDBC +2, XLE +1  Commodities are priced in dollars; a weakening
-    #            dollar is a mechanical tailwind.
-    #   KMLM +2  Trend is agnostic to WHICH way this resolves, and this is
-    #            precisely the kind of persistent directional move it
-    #            captures.
-    #   USFR +2  Floating rate. The front end pays a positive REAL rate here
-    #            (unlike repression, where it does not) and the coupon RISES
-    #            if the Fed responds to currency weakness by tightening.
-    "term_premium_repricing": {
-        "label": "Term Premium Repricing — fiscal/currency risk",
-        "blurb": (
-            "The INVERSE of financial repression. The short real rate is "
-            "positive (savers are paid), but the long end is rising while "
-            "the dollar FALLS — higher yields are failing to attract the "
-            "capital they normally would. That combination prices "
-            "fiscal/credibility risk, not growth or inflation expectations. "
-            "Long duration is the direct loser; real assets and trend are "
-            "the direct beneficiaries. Note this is NOT a credit event: "
-            "spreads are calm, which is what separates it from "
-            "liquidity_crisis. Watch whether credit eventually confirms what "
-            "rates are already pricing."
-        ),
-        "overlay": {
-            "TLT": -6, "VGT": -4, "QQQ": -2, "SMH": -1,
-            "GLD": +4, "SLV": +2, "PDBC": +2, "XLE": +1,
-            "KMLM": +2, "USFR": +2,
-        },
-    },
-    # v6, Sept 2026: RESTRICTIVE TIGHTENING — the state the term-premium
-    # branch's own comment describes ("rising yields WITH a firm dollar is
-    # ordinary tightening") but that no branch returned. It fell through to
-    # goldilocks, got blocked by the valuation guard, and was labelled
-    # `transition_ambiguous`, whose overlay holds TLT near base weight while
-    # long real yields rise — the opposite of what the checklist's own
-    # "TLT 0% while DFII10 rising" rule instructs.
-    #
-    # Signature: short real rate decisively POSITIVE (savers paid), long real
-    # yield RISING >= 0.20pp over 3 months, dollar NOT falling (otherwise it
-    # is term_premium_repricing), credit calm (otherwise liquidity_crisis).
-    # Live example 2026-09-26: short real +0.48%, DFII10 2.85% (+0.66pp/3mo),
-    # UUP +2.1% over 1 month, HY 2.80%, after a 25bp September hike.
-    #
-    # OVERLAY REASONING (sum-zero, -19 / +19):
-    #   TLT -8   Duration is the direct loser of rising real yields at the
-    #            long end. Leaves 2%, not 0: a residual hedge for the day the
-    #            tightening breaks something (the HY override re-arms it).
-    #   VGT -3, QQQ -2, SMH -1  Long-duration equity; a rising discount rate
-    #            compresses the multiples furthest out.
-    #   XLU -2   Bond proxy; same mechanism as TLT.
-    #   GLD -2, SLV -1  Rising REAL yields are gold's primary headwind (the
-    #            momentum gate already refuses adds in this state).
-    #   SGOV +6, USFR +5  The front end now pays a POSITIVE real rate. Cash
-    #            is an asset in this regime, and floaters reset upward if
-    #            the Fed keeps going.
-    #   KMLM +4  Trend earns in persistent rate moves, and the stock/bond
-    #            correlation is positive — the bond hedge is not working.
-    #   SCHD +3, XLV +1  Cash-flow equity with lower duration than growth.
-    "restrictive_tightening": {
-        "label": "Restrictive Tightening — real rates rising",
-        "blurb": (
-            "Real rates are rising at BOTH ends: the Fed is holding or "
-            "raising a policy rate above inflation, and the 10-year real "
-            "yield is climbing, while the dollar is firm and credit is calm. "
-            "Money is getting more expensive in an orderly way. Duration and "
-            "long-duration growth are the losers; front-end cash (paid a "
-            "positive real rate), trend and cash-flow defensives are the "
-            "winners. Not a crisis: watch HY spreads for the moment "
-            "tightening starts to break something."
-        ),
-        "overlay": {
-            "TLT": -8, "VGT": -3, "QQQ": -2, "SMH": -1, "XLU": -2,
-            "GLD": -2, "SLV": -1,
-            "SGOV": +6, "USFR": +5, "KMLM": +4, "SCHD": +3, "XLV": +1,
-        },
-    },
     # v3 FIX 6. Fires when |short real rate| < regime_bands.TRANSITION_BAND.
     # The gauge is inside its own measurement noise, so express NEITHER the
     # repression trade nor the reflation trade and take carry while waiting.
@@ -500,8 +391,6 @@ class SignalSet:
     hy_oas_mom_2w: Optional[float] = None
     ig_oas: Optional[float] = None
     stock_bond_corr_60d: Optional[float] = None
-    dxy: Optional[float] = None                   # broad USD index level
-    dxy_20d_change_pct: Optional[float] = None    # ~1-month % change
     asof: Optional[_dt.date] = None
     notes: list = field(default_factory=list)
 
@@ -540,7 +429,6 @@ def compute_signals(
     n2 = fetch_fred(FRED_SERIES["nom_2y"], fred_api_key, start)
     hy = fetch_fred(FRED_SERIES["hy_oas"], fred_api_key, start)
     ig = fetch_fred(FRED_SERIES["ig_oas"], fred_api_key, start)
-    dxy_s = fetch_fred(FRED_SERIES["dxy"], fred_api_key, start)
 
     # --- CPI YoY from the index (resample to month-end; calendar-safe) ---
     #
@@ -618,17 +506,6 @@ def compute_signals(
     sig.hy_oas = _last(hy)
     sig.hy_oas_mom_2w = _delta(hy, 10)
     sig.ig_oas = _last(ig)
-
-    # v5: dollar level + ~1-month change. The CHANGE is what matters for the
-    # term-premium divergence test -- a falling dollar WHILE long real yields
-    # rise is the signature; the level alone says little.
-    sig.dxy = _last(dxy_s)
-    if dxy_s is not None and len(dxy_s.dropna()) > 21:
-        _d = dxy_s.dropna()
-        _prior = float(_d.iloc[-22])
-        if _prior:
-            sig.dxy_20d_change_pct = round(
-                (float(_d.iloc[-1]) / _prior - 1) * 100, 2)
 
     # --- SIGNAL: stock/bond 60d correlation (the KMLM-sizing signal) ---
     try:
@@ -898,72 +775,6 @@ def classify_regime(sig: SignalSet, fetch_prices: Callable = None,
                        f"(decisively negative, beyond ±{band['band']:.2f}%)")
         drivers.append("2s10s re-steepening from inversion (growth risk)")
         return _regime("stagflation", drivers)
-
-    # 3b) TERM PREMIUM REPRICING -- v5. Placed BEFORE goldilocks because it
-    #     is a COMPETING EXPLANATION for the same underlying state: a
-    #     positive short real rate with calm credit. Goldilocks reads that
-    #     as benign. This branch asks whether the LONG end and the CURRENCY
-    #     agree -- and if the long end is rising while the dollar falls,
-    #     they do not. Higher yields that fail to attract capital are
-    #     pricing risk, not growth, and calling that "goldilocks" would
-    #     instruct adding growth into a fiscal/credibility repricing.
-    #
-    #     Requires ALL of:
-    #       * short real rate decisively POSITIVE  (not repression)
-    #       * long real yield RISING               (term premium expanding)
-    #       * dollar FALLING                       (the divergence itself)
-    #       * credit CALM                          (else liquidity_crisis)
-    #
-    #     The dollar condition is what makes this specific rather than just
-    #     "rates went up". Rising yields WITH a firm dollar is ordinary
-    #     tightening; rising yields with a FALLING dollar is the tell.
-    DXY_FALLING_PCT = -1.0     # ~1-month change; a real move, not noise
-    dxy_falling = (sig.dxy_20d_change_pct is not None
-                   and sig.dxy_20d_change_pct <= DXY_FALLING_PCT)
-    if (short_pos and long_mom is not None and long_mom > 0
-            and dxy_falling and hy is not None and hy < 3.5):
-        drivers.append(f"Short real rate {short_real:+.2f}% (positive — "
-                       f"savers PAID, the inverse of repression)")
-        drivers.append(f"Long real yield RISING ({long_mom:+.2f}pp/3mo) "
-                       f"while the dollar FELL "
-                       f"{sig.dxy_20d_change_pct:+.1f}% over ~1 month")
-        drivers.append("Higher yields failing to attract capital price "
-                       "FISCAL/CREDIBILITY risk, not growth or inflation "
-                       "expectations")
-        drivers.append(f"HY OAS {hy:.2f}% — credit CALM, so this is a "
-                       f"repricing, not yet a credit event")
-        return _regime("term_premium_repricing", drivers)
-
-    # 3c) RESTRICTIVE TIGHTENING — v6. Same positive-short-real, calm-credit
-    #     state as goldilocks, but the long end is rising fast and the dollar
-    #     is NOT falling (the falling-dollar case returned above). Placed
-    #     BEFORE goldilocks because rising real yields at both ends is
-    #     restrictive, not benign — goldilocks' guards (valuation, growth,
-    #     leadership) were catching this state for the wrong reason.
-    TIGHTENING_LONG_MOM_PP = 0.20      # 3-month rise in DFII10, pp
-    dxy_not_falling = (sig.dxy_20d_change_pct is None
-                       or sig.dxy_20d_change_pct > DXY_FALLING_PCT)
-    if (short_pos and long_mom is not None and long_mom >= TIGHTENING_LONG_MOM_PP
-            and dxy_not_falling and hy is not None and hy < 3.5):
-        drivers.append(f"Short real rate {short_real:+.2f}% (decisively "
-                       f"positive, beyond ±{band['band']:.2f}%) — policy is "
-                       f"above inflation")
-        drivers.append(f"Long real yield RISING {long_mom:+.2f}pp over 3 months "
-                       f"(threshold +{TIGHTENING_LONG_MOM_PP:.2f}pp)")
-        if sig.dxy_20d_change_pct is None:
-            drivers.append("⚠ Dollar 20-day change unavailable — cannot rule "
-                           "out term-premium repricing; treated as not falling")
-        else:
-            drivers.append(f"Dollar {sig.dxy_20d_change_pct:+.1f}% over ~1 month "
-                           f"— firm, so higher yields ARE attracting capital "
-                           f"(ordinary tightening, not a credibility repricing)")
-        drivers.append(f"HY OAS {hy:.2f}% — credit calm; tightening has not "
-                       f"broken anything yet")
-        if growth and g_confirmed and g_state == "DETERIORATING":
-            drivers.append("⚠ Growth composite DETERIORATING — tightening into "
-                           "a slowing economy raises the odds of a growth scare "
-                           "next; watch for CONTRACTING")
-        return _regime("restrictive_tightening", drivers)
 
     # 4) Goldilocks: DECISIVELY positive real + tight credit + leadership
     #    intact. v3 FIX 7 adds the third condition. Without it this branch fired
@@ -1267,65 +1078,3 @@ def full_assessment(fred_api_key: str = "",
             fed_bs_expanding=fed_bs_expanding,
             deficit_gt_5pct_gdp=deficit_gt_5pct_gdp),
     }
-
-
-# --------------------------------------------------------------------------- #
-#  Selftest (offline) — v6, Sept 2026
-# --------------------------------------------------------------------------- #
-def selftest() -> dict:
-    """Overlay invariants plus the branch boundaries around restrictive_tightening."""
-    fails = []
-    for k, r in REGIMES.items():
-        s = sum((r.get("overlay") or {}).values())
-        if s != 0:
-            fails.append(f"{k} overlay sums to {s}, must be 0")
-        unknown = set(r.get("overlay") or {}) - set(BASE_WEIGHTS)
-        if unknown:
-            fails.append(f"{k} overlay uses tickers not in BASE_WEIGHTS: {unknown}")
-
-    def sig(**kw):
-        base = dict(short_real_rate=0.48, long_real_yield=2.85, long_real_mom_3m=0.66,
-                    hy_oas=2.80, hy_oas_mom_2w=0.10, spread_2s10s=0.31,
-                    spread_2s10s_mom_3m=0.0, dxy_20d_change_pct=2.1)
-        base.update(kw)
-        return SignalSet(**base)
-
-    def key(s, **kw):
-        return classify_regime(s, fetch_prices=None, **kw)["key"]
-
-    # 2026-09-26 live inputs -> restrictive_tightening (was transition_ambiguous)
-    if key(sig(), cape=41.48, top20_concentration_pct=49.87) != "restrictive_tightening":
-        fails.append("today's inputs must classify as restrictive_tightening")
-    # dollar FALLING with the same rates -> term premium repricing wins
-    if key(sig(dxy_20d_change_pct=-1.5)) != "term_premium_repricing":
-        fails.append("falling dollar must still route to term_premium_repricing")
-    # long end NOT rising fast -> falls through to the goldilocks family
-    if key(sig(long_real_mom_3m=0.10), cape=41.48, top20_concentration_pct=49.87) != "transition_ambiguous":
-        fails.append("slow long-end rise with CAPE > 40 must stay in the valuation-guarded transition")
-    if key(sig(long_real_mom_3m=0.10), cape=30.0, top20_concentration_pct=35.0) != "goldilocks":
-        fails.append("slow long-end rise with valuation OK should reach goldilocks (leadership guard unwired)")
-    # credit stress overrides
-    if key(sig(hy_oas=5.5, hy_oas_mom_2w=0.8)) != "liquidity_crisis":
-        fails.append("HY crisis must override tightening")
-    # short real inside the band -> not tightening
-    if key(sig(short_real_rate=0.10)) == "restrictive_tightening":
-        fails.append("short real inside ±0.25% band must not confirm tightening")
-    # missing dollar data -> still tightening, with a named caveat
-    r = classify_regime(sig(dxy_20d_change_pct=None))
-    if r["key"] != "restrictive_tightening" or not any("unavailable" in d for d in r["drivers"]):
-        fails.append("missing DXY must classify tightening and say so in drivers")
-    # growth contraction dominates
-    if key(sig(), growth={"state": "CONTRACTING", "confirmed": True, "score": -4, "detail": "t"}) != "growth_scare":
-        fails.append("confirmed contraction must override tightening")
-
-    tw = target_weights("restrictive_tightening")
-    if abs(sum(tw.values()) - 100) > 0.5:
-        fails.append(f"restrictive_tightening targets sum to {sum(tw.values())}")
-    if tw.get("TLT", 99) > 3 or tw.get("SGOV", 0) < 10:
-        fails.append(f"tightening targets should cut TLT to ~2 and lift SGOV: {tw}")
-    return {"ok": not fails, "failures": fails, "targets_restrictive_tightening": tw}
-
-
-if __name__ == "__main__":
-    import json as _json
-    print(_json.dumps(selftest(), indent=2, default=str))

@@ -272,49 +272,19 @@ def alerts(ctx: dict, signals: Optional[dict] = None) -> list[dict]:
     # them means recent months are running meaningfully hotter or cooler
     # than the trailing 12-month figure reflects -- exactly the situation
     # where the slower number is about to start moving.
-    #
-    # v2, Sept 2026: the 3-month rate can be dominated by ONE outlier month.
-    # On 2026-09-26 the 3M SAAR read +0.18% because June CPI fell 0.42% —
-    # while August alone rose 0.40% (~4.9% annualized). The old alert read
-    # that as "recent pace cooler, real rate heading higher", the opposite of
-    # what the latest month said. Now the latest month is annualized and
-    # compared too; when it disagrees with the 3-month read the alert says
-    # so and does not draw the directional conclusion.
     saar, yoy = s.get("cpi_3m_saar"), s.get("cpi_yoy")
-    mom = s.get("cpi_mom_sa")
     if saar is not None and yoy is not None:
         saar, yoy = float(saar), float(yoy)
         gap = saar - yoy
         thresh = R["cpi_saar_divergence"]
         if abs(gap) >= thresh:
             direction = "hotter" if gap > 0 else "cooler"
-            ann1 = None
-            if mom is not None:
-                ann1 = ((1 + float(mom) / 100) ** 12 - 1) * 100
-            # latest month's annualized pace on the OTHER side of YoY from
-            # the 3-month read -> the 3-month figure is being carried by an
-            # earlier month, and the signals conflict.
-            conflict = ann1 is not None and ((gap < 0 and ann1 >= yoy) or (gap > 0 and ann1 <= yoy))
-            if conflict:
-                total3 = ((1 + saar / 100) ** 0.25 - 1) * 100          # 3-month cumulative %
-                prior2 = total3 - float(mom)                             # the two earlier months
-                add("INFO", "cpi_mixed_signal",
-                    f"CPI 3M SAAR ({saar:+.2f}%) runs {abs(gap):.1f}pp {direction} than "
-                    f"YoY ({yoy:+.2f}%), but the LATEST month is {float(mom):+.2f}% "
-                    f"(≈{ann1:+.1f}% annualized) — on the other side of YoY.",
-                    f"The 3-month rate is being carried by the two earlier months "
-                    f"(combined {prior2:+.2f}%), not by the current pace. Do NOT read "
-                    f"this as {'disinflation' if gap < 0 else 'reacceleration'}: the "
-                    f"most recent print points the other way. Wait for the next CPI "
-                    f"before drawing a direction for the short real rate.")
-            else:
-                pace = f" Latest month ≈{ann1:+.1f}% annualized agrees." if ann1 is not None else ""
-                add("INFO", "cpi_saar_divergence",
-                    f"CPI 3M SAAR ({saar:+.2f}%) is running {abs(gap):.1f}pp "
-                    f"{direction} than CPI YoY NSA ({yoy:+.2f}%).{pace}",
-                    f"The trailing YoY figure hasn't caught up to the recent "
-                    f"pace yet. {'Watch for the short real rate to move toward decisively negative as this feeds through.' if gap > 0 else 'Watch for the short real rate to move toward decisively positive as this feeds through.'} "
-                    f"Not same-day actionable — flag for the weekly review.")
+            add("INFO", "cpi_saar_divergence",
+                f"CPI 3M SAAR ({saar:+.2f}%) is running {abs(gap):.1f}pp "
+                f"{direction} than CPI YoY NSA ({yoy:+.2f}%).",
+                f"The trailing YoY figure hasn't caught up to the recent "
+                f"pace yet. {'Watch for the short real rate to move toward decisively negative as this feeds through.' if gap > 0 else 'Watch for the short real rate to move toward decisively positive as this feeds through.'} "
+                f"Not same-day actionable — flag for the weekly review.")
 
     # ── Tape: only when the move is large enough that "nothing happened"
     #    would be false ────────────────────────────────────────────────────
@@ -436,21 +406,6 @@ def selftest() -> dict:
         got_bar = expected_last_bar(now)
         if got_bar != want:
             failures.append(f"expected_last_bar({now}) = {got_bar}, want {want}")
-
-    # CPI interpretation (Sept 2026): the real 2026-09 data — 3M SAAR +0.18,
-    # YoY +3.40, August +0.40% — must be flagged as MIXED, not disinflation.
-    mixed = alerts(calm_ctx, dict(calm_sig, cpi_3m_saar=0.18, cpi_yoy=3.40, cpi_mom_sa=0.396))
-    rules = {a["rule"] for a in mixed}
-    if "cpi_mixed_signal" not in rules or "cpi_saar_divergence" in rules:
-        failures.append(f"Sept-2026 CPI must read as mixed, not a clean divergence: {rules}")
-    else:
-        msg = next(a for a in mixed if a["rule"] == "cpi_mixed_signal")
-        if "4.9" not in msg["message"] or "disinflation" not in msg["action"]:
-            failures.append(f"mixed-signal text should show ≈+4.9% annualized and warn off 'disinflation': {msg}")
-    # all three agree cooler -> the original divergence alert still fires
-    cool = alerts(calm_ctx, dict(calm_sig, cpi_3m_saar=0.9, cpi_yoy=3.4, cpi_mom_sa=0.05))
-    if not any(a["rule"] == "cpi_saar_divergence" for a in cool):
-        failures.append("a genuinely cooler recent pace must still fire cpi_saar_divergence")
 
     # 3M window: a 6-month daily series must yield a d63 value.
     import pandas as _pd
