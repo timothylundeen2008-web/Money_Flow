@@ -188,9 +188,6 @@ ISSUER_ISHARES = set(ISHARES_IDS)
 SSGA_NAVHIST_URL = ("https://www.ssga.com/library-content/products/fund-data/"
                     "etfs/us/navhist-us-en-{t}.xlsx")
 ISHARES_PAGE_URL = "https://www.ishares.com/us/products/{id}/"
-# Sources that carry a REPORTED share count (issuer file, or a relay of it)
-# rather than an estimate. Once any exist for a ticker, only these count.
-REPORTED_PREFIXES = ("issuer", "thirdparty")
 ISSUER_MAX_AGE_DAYS = 6          # an issuer figure older than this is stale
 _UA = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36")}
@@ -367,56 +364,11 @@ def _browser_get(url: str, timeout: int = 30) -> str:
     raise RuntimeError(f"{url}: " + "; ".join(errs))
 
 
-# v4.2, Sept 2026: the 2026-09-26 run showed iShares refusing GitHub runner
-# IPs outright (403 even with Chrome impersonation) — an IP block, not a
-# client block. Disabled so it stops adding 15 failures per run; the iShares
-# tickers fall through to the third-party source below. Re-enable if the
-# poll ever moves off GitHub-hosted runners.
-ISHARES_ENABLED = False
-
-# Third-party relay of issuer-reported shares outstanding. Verified
-# 2026-09-26 against issuer figures: IWM 272.65M (iShares page: 272,650,000),
-# XLK 651.01M (SSGA file: 651.26M the prior day). Covers every tracked
-# ticker, including funds with no issuer source here (QQQ, VGT, SMH, SCHD,
-# PDBC, KMLM, USFR, SGOV, GLD...). Resolution is 0.01M shares — ample for
-# 20-day flow sums. No as-of date is printed, so rows use the poll date.
-STOCKANALYSIS_URL = "https://stockanalysis.com/etf/{t}/"
-_SA_MULT = {"K": 1e3, "M": 1e6, "B": 1e9}
-
-
-def parse_stockanalysis_page(html: str, ticker: str) -> float:
-    """Extract shares outstanding from a StockAnalysis ETF page. Verifies the
-    page is for `ticker`; raises ValueError with a reason otherwise."""
-    import re
-    title = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
-    head = title.group(1) if title else html[:3000]
-    if not re.search(rf"\b{re.escape(ticker)}\b", head, re.I):
-        raise ValueError(f"page is not for {ticker} (title: {head.strip()[:80]!r})")
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"\s+", " ", text)
-    m = re.search(r"Shares Out(?:standing)?\s*\|?\s*([\d.,]+)\s*([KMB])\b", text)
-    if not m:
-        raise ValueError("no 'Shares Out' figure on page")
-    val = float(m.group(1).replace(",", "")) * _SA_MULT[m.group(2)]
-    if val <= 0:
-        raise ValueError(f"non-positive shares {val}")
-    return val
-
-
-def _shares_from_stockanalysis(ticker: str) -> tuple[float | None, float | None]:
-    try:
-        html = _browser_get(STOCKANALYSIS_URL.format(t=ticker.lower()))
-        return parse_stockanalysis_page(html, ticker), None
-    except Exception as e:
-        _log_error(ticker, "stockanalysis", e)
-        return None, None
-
-
 def _shares_from_ishares(ticker: str) -> tuple[float | None, float | None]:
     """Reported shares outstanding from the iShares/BlackRock product page.
     Price is left to the caller (yfinance close); flows only need Δshares × price."""
     pid = ISHARES_IDS.get(ticker)
-    if pid is None or not ISHARES_ENABLED:
+    if pid is None:
         return None, None
     failures = []
     for tmpl in ISHARES_PAGE_URLS:
@@ -533,13 +485,8 @@ def _snapshot_one(ticker: str) -> dict | None:
             used = "issuer_" + primary.__name__.replace("_shares_from_", "")
             row_date = _LAST_ASOF.get(ticker, row_date)
 
-    # v4.2: third-party relay of reported shares, before any estimate.
-    if shares is None:
-        s, p = _shares_from_stockanalysis(ticker)
-        if s:
-            shares, price, used = s, p, "thirdparty_stockanalysis"
-
-    # aum_implied is always fetched: last-resort estimate, and a cross-check.
+    # aum_implied is always fetched: primary when no issuer answered, and a
+    # cross-check when one did.
     aum_shares, aum_price = _shares_from_aum_implied(ticker)
     if shares is None and aum_shares:
         shares, price, used = aum_shares, aum_price, "aum_implied"
@@ -566,11 +513,9 @@ def _snapshot_one(ticker: str) -> dict | None:
         divergence = abs(aum_shares - shares) / shares
         row["aum_implied_shares"] = round(float(aum_shares), 0)
         row["cross_check_divergence_pct"] = round(divergence * 100, 2)
-        # v4.2: the reported figure wins; a large gap is evidence the frozen
-        # yfinance totalAssets estimate is wrong, not that the report is.
         if divergence > CROSS_CHECK_DIVERGENCE_PCT:
-            print(f"[etf_flow] {ticker}: reported ({used}) vs aum_implied estimate differ "
-                  f"{divergence*100:.1f}% — the estimate is stale; reported figure used.")
+            print(f"[etf_flow] {ticker}: {used} vs aum_implied diverge "
+                 f"{divergence*100:.1f}% — worth a manual look.")
 
     return row
 
@@ -719,7 +664,7 @@ def ticker_quality(g: pd.DataFrame, window: int = 20) -> dict:
     g = g.sort_values("date")
     src = g["shares_source"].iloc[-1] if "shares_source" in g.columns and len(g) else None
     if "shares_source" in g.columns and len(g):
-        is_issuer = g["shares_source"].astype(str).str.startswith(REPORTED_PREFIXES)
+        is_issuer = g["shares_source"].astype(str).str.startswith("issuer")
         if is_issuer.tail(5).any():
             # Issuer data present recently: judge on issuer rows only. A
             # one-day issuer outage (aum fallback that day) must not reset an
@@ -810,7 +755,7 @@ def compute_flows(store: str = DEFAULT_STORE) -> pd.DataFrame:
         informative = ~g["stale_aum"]
         first_issuer = None
         if "shares_source" in g.columns:
-            is_issuer = g["shares_source"].astype(str).str.startswith(REPORTED_PREFIXES)
+            is_issuer = g["shares_source"].astype(str).str.startswith("issuer")
             if is_issuer.any():
                 # Once issuer data exists, only issuer rows are informative:
                 # an estimate differenced against a reported figure is noise.
@@ -1158,24 +1103,6 @@ def selftest() -> dict:
         parse_ishares_page(html, "TLT"); f.append("iShares page for another fund must be rejected")
     except ValueError:
         pass
-
-    sa = ("<html><head><title>IWM ETF Stock Price &amp; Overview</title></head><body>"
-          "<table><tr><td>Assets</td><td>$75.91B</td></tr>"
-          "<tr><td>Shares Out</td><td>272.65M</td></tr></table></body></html>")
-    try:
-        if parse_stockanalysis_page(sa, "IWM") != 272_650_000:
-            f.append("stockanalysis parse wrong")
-    except Exception as e:
-        f.append(f"stockanalysis parse raised: {e}")
-    try:
-        parse_stockanalysis_page(sa, "QQQ"); f.append("stockanalysis page for another fund must be rejected")
-    except ValueError:
-        pass
-    q_tp = ticker_quality(pd.DataFrame({"date": pd.to_datetime(dates[:6]), "ticker": "T",
-                                        "shares_outstanding": [1e6, 1e6, 1.01e6, 1.01e6, 1.02e6, 1.02e6],
-                                        "price": px[:6], "shares_source": "thirdparty_stockanalysis"}))
-    if not q_tp["trustworthy"]:
-        f.append(f"a moving third-party reported series must be trustworthy: {q_tp}")
 
     # ── issuer rows supersede estimates; a one-day outage doesn't reset them
     rows2 = []
