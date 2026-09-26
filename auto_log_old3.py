@@ -62,13 +62,17 @@ from datetime import datetime
 
 import market_time as mt
 
-# Macro/valuation flags (fed_bs_expanding, deficit, CAPE, top-20
-# concentration) now come from macro_flags.py — ONE shared module, live where
-# possible, dated manual fallbacks otherwise, with staleness warnings carried
-# into every log. Sept 2026: these used to be hand-typed here, in app.py and
-# in checklist_tab.py, and the regime's valuation guard was running on a CAPE
-# 46+ days old without any log saying so.
-import macro_flags
+# Manual macro/valuation flags — same set, same "why", as checklist_tab.py
+# and app.py. Kept in sync by hand; review dates whenever the underlying
+# facts change. CAPE and concentration specifically arm the goldilocks
+# valuation guard — without them it fails open silently, which is exactly
+# how a scheduled run could log a goldilocks regime through a stretch where
+# CAPE was already above the guard's own 40.0 block level.
+FED_BS_EXPANDING = True
+DEFICIT_GT_5PCT_GDP = True
+CAPE_CURRENT = 42.0                  # multpl.com, 2026-08-10
+TOP20_CONCENTRATION_PCT = 50.8       # JPMorgan, cited 2026-08-07 review
+MACRO_FLAGS_REVIEWED = "2026-08-13"
 
 DAILY_CSV = "logs/daily_log.csv"
 WEEKLY_CSV = "logs/weekly_log.csv"
@@ -145,12 +149,11 @@ def run_daily(fred_key: str = "", force: bool = False) -> dict:
     def _regime():
         import regime_classifier as rc
         from fred_client import fetch_fred
-        flags = macro_flags.get_flags(fetch_fred=fetch_fred, api_key=fred_key)
-        row["_macro_flags"] = flags
-        row["macro_flags"] = " | ".join(macro_flags.summary_lines(flags)).replace("**", "")
-        row["macro_flag_warnings"] = " || ".join(flags["warnings"])
         out = rc.full_assessment(fred_key, fetch_fred=fetch_fred,
-                                 **macro_flags.classifier_kwargs(flags))
+                                 fed_bs_expanding=FED_BS_EXPANDING,
+                                 deficit_gt_5pct_gdp=DEFICIT_GT_5PCT_GDP,
+                                 cape=CAPE_CURRENT,
+                                 top20_concentration_pct=TOP20_CONCENTRATION_PCT)
         sig, reg = out["signals"], out["regime"]
         sc, km = out["repression"], out["kmlm"]
         return {
@@ -374,15 +377,6 @@ def build_summary(row: dict, kind: str = "daily") -> str:
     if row.get("missing"):
         L.append(f"- ⚠ **Missing inputs:** {row['missing']} — this is an "
                  f"INCOMPLETE score, not necessarily a low one.")
-    # Sept 2026: the hand-set inputs the classifier can't fetch itself, with
-    # their source and age, so a stale guard input is visible in the log.
-    flags = row.get("_macro_flags")
-    if flags:
-        L.append("- **Regime inputs (macro_flags):**")
-        for line in macro_flags.summary_lines(flags):
-            L.append(f"  - {line}")
-        for w in flags.get("warnings", []):
-            L.append(f"  - ⚠ {w}")
     L.append("")
 
     # The log line
