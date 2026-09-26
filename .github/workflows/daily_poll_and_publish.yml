@@ -84,7 +84,7 @@ jobs:
               snapshot_all()
               errs = load_last_run_errors().get("errors", {})
               issuer_errs = {t: e for t, e in errs.items()
-                             if any(s.startswith(("spdr", "ishares", "stockanalysis")) for s in e)}
+                             if any(s.startswith(("spdr", "schwab", "ishares", "stockanalysis")) for s in e)}
               if issuer_errs:
                   print(f"::warning::issuer source failed for {len(issuer_errs)} tickers: "
                         + ", ".join(sorted(issuer_errs)))

@@ -396,51 +396,11 @@ def parse_stockanalysis_page(html: str, ticker: str) -> float:
     text = re.sub(r"\s+", " ", text)
     m = re.search(r"Shares Out(?:standing)?\s*\|?\s*([\d.,]+)\s*([KMB])\b", text)
     if not m:
-        if re.search(r"Shares Out(?:standing)?\s*\|?\s*n/?a\b", text, re.I):
-            # Observed 2026-09-26: some tickers (SCHD, TIP) print "n/a" on
-            # some days and a value on others. A gap day, not a parse bug.
-            raise ValueError("StockAnalysis shows 'Shares Out: n/a' today (data gap, not a parse error)")
         raise ValueError("no 'Shares Out' figure on page")
     val = float(m.group(1).replace(",", "")) * _SA_MULT[m.group(2)]
     if val <= 0:
         raise ValueError(f"non-positive shares {val}")
     return val
-
-
-# Schwab ETFs — the fund page prints "Shares Outstanding  As of MM/DD/YYYY ...
-# N". Verified 2026-09-26: SCHD 3,294,650,000 as of 09/24/2026 (StockAnalysis
-# showed n/a for SCHD that day).
-ISSUER_SCHWAB = {"SCHD"}
-SCHWAB_URL = "https://www.schwabassetmanagement.com/products/{t}"
-
-
-def parse_schwab_page(html: str, ticker: str) -> tuple[float, str]:
-    import re
-    if not re.search(rf"\b{re.escape(ticker)}\b", html[:20000], re.I):
-        raise ValueError(f"page does not mention {ticker}")
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"\s+", " ", text)
-    i = text.find("Shares Outstanding")
-    if i < 0:
-        raise ValueError("no 'Shares Outstanding' on page")
-    window = text[i:i + 300]
-    dt = re.search(r"(\d{2}/\d{2}/\d{4})", window)
-    num = re.search(r"(\d{1,3}(?:,\d{3}){2,})", window)
-    if not num or not dt:
-        raise ValueError(f"no share count/date near 'Shares Outstanding': {window[:120]!r}")
-    return float(num.group(1).replace(",", "")), pd.to_datetime(dt.group(1)).date().isoformat()
-
-
-def _shares_from_schwab(ticker: str) -> tuple[float | None, float | None]:
-    try:
-        shares, asof = parse_schwab_page(_browser_get(SCHWAB_URL.format(t=ticker.lower())), ticker)
-        if not _fresh(asof, ticker, "schwab"):
-            return None, None
-        _LAST_ASOF[ticker] = asof
-        return shares, None
-    except Exception as e:
-        _log_error(ticker, "schwab", e)
-        return None, None
 
 
 def _shares_from_stockanalysis(ticker: str) -> tuple[float | None, float | None]:
@@ -538,14 +498,11 @@ def _shares_from_yfinance(ticker: str) -> tuple[float | None, float | None]:
 # ── Routing ──────────────────────────────────────────────────────────────────
 
 def _issuer_source_for(ticker: str):
-    # v4.3: spdr_gold removed from routing — its endpoint 404s every run and
-    # the history file blocks automated readers; GLD is covered by the
-    # third-party relay (verified 352.40M on 2026-09-26).
+    if ticker in ISSUER_SPDR_GOLD:
+        return _shares_from_spdr_gold
     if ticker in ISSUER_SPDR:
         return _shares_from_spdr
-    if ticker in ISSUER_SCHWAB:
-        return _shares_from_schwab
-    if ticker in ISSUER_ISHARES and ISHARES_ENABLED:
+    if ticker in ISSUER_ISHARES:
         return _shares_from_ishares
     return None
 
@@ -1214,22 +1171,6 @@ def selftest() -> dict:
         parse_stockanalysis_page(sa, "QQQ"); f.append("stockanalysis page for another fund must be rejected")
     except ValueError:
         pass
-    try:
-        parse_stockanalysis_page(sa.replace("IWM", "TIP").replace("272.65M", "n/a"), "TIP")
-        f.append("an n/a Shares Out must raise")
-    except ValueError as e:
-        if "n/a" not in str(e):
-            f.append(f"n/a must be named as a data gap: {e}")
-    sch = ("<html><title>SCHD | Schwab U.S. Dividend Equity ETF</title><body>"
-           "<th>Shares Outstanding</th><td>As of 09/24/2026</td><td>09/24/2026</td>"
-           "<td>3,294,650,000</td></body></html>")
-    try:
-        if parse_schwab_page(sch, "SCHD") != (3_294_650_000, "2026-09-24"):
-            f.append(f"schwab parse wrong: {parse_schwab_page(sch, 'SCHD')}")
-    except Exception as e:
-        f.append(f"schwab parse raised: {e}")
-    if _issuer_source_for("SCHD") is not _shares_from_schwab or _issuer_source_for("GLD") is not None:
-        f.append("routing: SCHD -> schwab, GLD -> no issuer (third-party)")
     q_tp = ticker_quality(pd.DataFrame({"date": pd.to_datetime(dates[:6]), "ticker": "T",
                                         "shares_outstanding": [1e6, 1e6, 1.01e6, 1.01e6, 1.02e6, 1.02e6],
                                         "price": px[:6], "shares_source": "thirdparty_stockanalysis"}))
