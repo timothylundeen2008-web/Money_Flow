@@ -1,14 +1,4 @@
 {
-  "run_at": "2026-09-26T10:45:58.263604",
-  "errors": {
-    "SGOV": [
-      "stockanalysis: ValueError: StockAnalysis shows 'Shares Out: n/a' today (data gap, not a parse error)"
-    ],
-    "TIP": [
-      "stockanalysis: ValueError: StockAnalysis shows 'Shares Out: n/a' today (data gap, not a parse error)"
-    ],
-    "EFA": [
-      "stockanalysis: ValueError: StockAnalysis shows 'Shares Out: n/a' today (data gap, not a parse error)"
-    ]
-  }
+  "run_at": "2026-09-29T01:16:02.971770",
+  "errors": {}
 }
