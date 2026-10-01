@@ -346,16 +346,6 @@ def _tier_a_readable() -> bool:
     return _flow_integrity is not None and _flow_state is not None
 
 
-# ── Flow Map (Oct 2026) — the one-read answer to "where is money going" ───────
-# Sources and destinations from verified (Tier A) ETF creations/redemptions,
-# grouped by theme with a risk-on / risk-off read. Everything below is kept.
-try:
-    import flow_map as _flow_map
-    _flow_map.render(st)
-except Exception as _fm_e:
-    st.warning(f"Flow map unavailable: {type(_fm_e).__name__}: {_fm_e}")
-st.markdown("---")
-
 # ── KPI metric cards ───────────────────────────────────────────────────────────
 st.markdown('<div class="section-label">Market rotation overview</div>', unsafe_allow_html=True)
 

@@ -157,11 +157,6 @@ TRACKED = [
     "LQD", "EMB", "TIP",                          # Fixed Income
     "USO", "DBA",                                  # Commodities
     "EFA", "EWJ", "FXI", "INDA",                  # International
-    # v5, Oct 2026: the broad market itself. Without SPY the flow map could
-    # not tell "rotating between sectors" from "leaving US equities". SPDR
-    # fund -> SSGA NAV-history routing + the daily backfill seed ~90 days of
-    # real history on the first poll (falls back like any SPDR fund if not).
-    "SPY",
 ]
 
 # ── Issuer routing table ────────────────────────────────────────────────────
@@ -181,7 +176,7 @@ TRACKED = [
 #          yet verified, so it stays on the fallback path for now).
 ISSUER_SPDR = {"XLK", "XLF", "XLI", "XLY", "XLRE", "XLB", "XLC", "XLP",
                "XLE", "XLV", "XLU", "KRE", "KBE", "XOP", "XBI", "XRT",
-               "XHB", "XTN", "MDY", "SPY"}
+               "XHB", "XTN", "MDY"}
 ISSUER_SPDR_GOLD = {"GLD"}
 ISHARES_IDS = {
     "IWM": 239710, "TLT": 239454, "HYG": 239565, "EEM": 239637,
