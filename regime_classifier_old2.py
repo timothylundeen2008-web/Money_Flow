@@ -378,30 +378,6 @@ REGIMES = {
             "SGOV": +6, "USFR": +5, "KMLM": +4, "SCHD": +3, "XLV": +1,
         },
     },
-    # v7: CREDIT STRESS. Every calm-credit branch above (hard repression,
-    # term premium, restrictive tightening, goldilocks) required HY OAS < 3.5%,
-    # and the only branch for wide spreads was the liquidity-crisis override
-    # (> 5% AND +0.5pp in two weeks). Between 3.5% and that override nothing
-    # matched, so a widening-credit tape fell through to "neutral" -- the
-    # label that means "hold base weights". This is the missing state.
-    "credit_stress": {
-        "label": "Credit Stress — spreads widening",
-        "blurb": (
-            "High-yield spreads have left the calm zone (>= 3.5%) and are "
-            "either widening fast or already wide (>= 4.5%), but have not hit "
-            "the liquidity-crisis override. Credit leads equities: trim "
-            "high-multiple growth and cyclicals, lift front-end cash, trend "
-            "and quality defensives. Duration is deliberately NOT added or "
-            "cut here: with long yields high it can either rally (flight to "
-            "quality) or keep bleeding (term premium), and only the crisis "
-            "override or the long real yield falling can tell them apart."
-        ),
-        # sum-zero: -10 / +10
-        "overlay": {
-            "VGT": -3, "QQQ": -3, "SMH": -2, "XLE": -1, "PDBC": -1,
-            "SGOV": +4, "USFR": +2, "KMLM": +2, "XLV": +2,
-        },
-    },
     # v3 FIX 6. Fires when |short real rate| < regime_bands.TRANSITION_BAND.
     # The gauge is inside its own measurement noise, so express NEITHER the
     # repression trade nor the reflation trade and take carry while waiting.
@@ -528,11 +504,10 @@ class SignalSet:
     dxy_20d_change_pct: Optional[float] = None    # ~1-month % change
     asof: Optional[_dt.date] = None
     notes: list = field(default_factory=list)
-    credit_cycle: Optional[dict] = None           # v7: spread-peak re-entry state
 
     def as_row(self) -> pd.DataFrame:
         d = {k: v for k, v in self.__dict__.items()
-             if k not in ("notes", "asof", "credit_cycle")}
+             if k not in ("notes", "asof")}
         return pd.DataFrame([d])
 
 
@@ -642,10 +617,6 @@ def compute_signals(
     # --- Credit spreads ---
     sig.hy_oas = _last(hy)
     sig.hy_oas_mom_2w = _delta(hy, 10)
-    try:
-        sig.credit_cycle = credit_cycle_state(hy)
-    except Exception as exc:                 # optional signal; never break the regime read
-        sig.credit_cycle = {"state": "UNAVAILABLE", "action": f"credit cycle failed: {exc}"}
     sig.ig_oas = _last(ig)
 
     # v5: dollar level + ~1-month change. The CHANGE is what matters for the
@@ -686,38 +657,23 @@ def compute_signals(
 # --------------------------------------------------------------------------- #
 def fed_reaction_flag(sig: SignalSet) -> dict:
     """
-    Soft repression  = Fed BEHIND the curve (short real rate <= +0.25%) while
-                       inflation runs above target and the long real yield is
-                       positive -- inflation quietly erodes the debt.
-    Restrictive      = Fed holding policy ABOVE inflation (short real > +0.25%).
-                       Savers are paid; that is tightening, not repression, even
-                       with inflation above target. (Sept 2026 fix: the old test
-                       ignored the short real rate, so a +0.48% policy rate read
-                       "SOFT repression" beside a restrictive_tightening regime.)
-    Hard repression  = inflation high AND long real yield suppressed toward or
-                       below zero (yield-curve control).
-    Display-only: this flag never sets a weight; classify_regime() governs.
+    Soft repression  = Fed HOLDING/HIKING into above-target inflation, long real
+                       yield positive (inflation overshoot erodes debt).
+    Hard repression  = Fed CUTTING/CAPPING while inflation high AND long real
+                       yield suppressed toward/below zero (yield-curve control).
     """
     inflation_hot = (sig.cpi_yoy or 0) > FED_TARGET_INFLATION + 0.5
     long_real = sig.long_real_yield
     long_real_pos = long_real is not None and long_real > 0.5
-    short = sig.short_real_rate
-    restrictive = short is not None and short > 0.25
 
-    if inflation_hot and long_real is not None and long_real < 0.25:
+    if inflation_hot and long_real_pos:
+        state = "SOFT repression (inflation overshoot)"
+        detail = ("Fed tolerating / fighting above-target inflation while the "
+                  "long end stays positive. Long duration is NOT safe here.")
+    elif inflation_hot and long_real is not None and long_real < 0.25:
         state = "HARD repression (yield suppression / YCC risk)"
         detail = ("Long real yields pinned low despite hot inflation — classic "
                   "financial-repression signature. Nominal bonds bleed slowly.")
-    elif restrictive:
-        state = "RESTRICTIVE (policy above inflation)"
-        detail = (f"Short real rate {short:+.2f}% — the Fed is holding policy above "
-                  f"inflation{' even with CPI above target' if inflation_hot else ''}. "
-                  "Savers are paid: this is tightening, not repression. Long duration "
-                  "is NOT safe while the long real yield is rising.")
-    elif inflation_hot and long_real_pos:
-        state = "SOFT repression (inflation overshoot)"
-        detail = ("Fed behind the curve on above-target inflation while the long end "
-                  "stays positive. Long duration is NOT safe here.")
     else:
         state = "Not repressive"
         detail = "Inflation near target or real yields unremarkable."
@@ -1065,32 +1021,6 @@ def classify_regime(sig: SignalSet, fetch_prices: Callable = None,
         drivers.append(f"HY OAS {hy:.2f}% (tight credit)")
         return _regime("goldilocks", drivers)
 
-    # 4b) CREDIT STRESS -- v7. Reached only when no calm-credit regime
-    #     matched. HY OAS >= 3.5% AND either widening (>= +0.25pp over ~2
-    #     weeks) or simply wide (>= 4.5%). A wide-but-stable 3.5-4.5% tape
-    #     still falls through: level alone is not stress.
-    CREDIT_CALM_MAX_PCT = 3.5
-    CREDIT_WIDEN_2W_PP = 0.25
-    CREDIT_WIDE_PCT = 4.5
-    hy_widening = (sig.hy_oas_mom_2w or 0) >= CREDIT_WIDEN_2W_PP
-    if hy is not None and hy >= CREDIT_CALM_MAX_PCT and (hy_widening or hy >= CREDIT_WIDE_PCT):
-        drivers.append(f"HY OAS {hy:.2f}% — out of the calm zone "
-                       f"(>= {CREDIT_CALM_MAX_PCT:.1f}%)")
-        if hy_widening:
-            drivers.append(f"Spreads widening {sig.hy_oas_mom_2w:+.2f}pp over ~2 weeks "
-                           f"(threshold +{CREDIT_WIDEN_2W_PP:.2f}pp)")
-        if hy >= CREDIT_WIDE_PCT:
-            drivers.append(f"Spread level >= {CREDIT_WIDE_PCT:.1f}% — wide regardless of trend")
-        if long_mom is not None:
-            drivers.append(f"Long real yield {long_mom:+.2f}pp/3mo "
-                           f"({'rising — rates and credit both tightening' if long_mom > 0 else 'falling — flight to quality building'})")
-        if sig.spread_2s10s_mom_3m is not None and curve_resteep:
-            drivers.append(f"2s10s steepening {sig.spread_2s10s_mom_3m:+.2f}pp/3mo")
-        if short_real is not None:
-            drivers.append(f"Short real rate {short_real:+.2f}%")
-        drivers.append("Not yet a liquidity crisis (needs HY > 5.0% AND +0.5pp/2wk)")
-        return _regime("credit_stress", drivers)
-
     # 5) v3 FIX 6: the gauge is inside its own noise. Distinct from 'neutral',
     #    which means the signals disagree; this means the main signal is silent.
     if band["state"] == _rb.BAND_AMBIGUOUS:
@@ -1332,95 +1262,11 @@ def full_assessment(fred_api_key: str = "",
         "fed": fed_reaction_flag(sig),
         "targets": target_weights(regime["key"], fetch_prices=fetch_prices),
         "kmlm": kmlm_signal(sig),
-        "credit_cycle": sig.credit_cycle or {"state": "UNAVAILABLE",
-                                             "action": _CC_ACTION["UNAVAILABLE"]},
         "repression": repression_score(
             sig,
             fed_bs_expanding=fed_bs_expanding,
             deficit_gt_5pct_gdp=deficit_gt_5pct_gdp),
     }
-
-
-# --------------------------------------------------------------------------- #
-#  v7 — CREDIT CYCLE / SPREAD-PEAK RE-ENTRY RULE (Oct 2026)
-# --------------------------------------------------------------------------- #
-# The regime branches catch credit ESCALATION (credit_stress, liquidity_crisis)
-# but nothing said when the episode is OVER. The profitable trade in a credit
-# cycle is buying cyclical / deep value and small caps after spreads PEAK and
-# turn -- not while they widen. This is a separate state machine on the HY OAS
-# history; it never changes the regime key or the overlay weights. It gates
-# which ADDS are eligible at the weekend review.
-#
-#   NO_EPISODE        HY never reached the stress line in the lookback
-#   WIDENING          at/near the episode high, or the high is < 10 sessions old
-#   PEAK_FORMING      off the high, but not enough retrace or still re-widening
-#   RE_ENTRY_PENDING  peak-and-turn conditions met on 1 close
-#   RE_ENTRY          met on 2 consecutive closes (the two-close protocol)
-#
-# Peak-and-turn = ALL of: episode high >= 3.5% in the last ~6 months, high is
-# >= 10 sessions old, spreads have retraced >= max(0.50pp, 25% of the
-# trough-to-peak widening), and the 2-week change is negative.
-CREDIT_EPISODE_MIN_PCT = 3.5
-CREDIT_LOOKBACK = 126           # ~6 months of sessions
-CREDIT_PEAK_AGE_MIN = 10
-CREDIT_RETRACE_MIN_PP = 0.50
-CREDIT_RETRACE_FRAC = 0.25
-CREDIT_NEAR_PEAK_PP = 0.10
-
-_CC_ACTION = {
-    "NO_EPISODE": "No credit episode in the last ~6 months — the re-entry rule is inactive.",
-    "WIDENING": ("Spreads at or near the episode high. Do NOT add cyclical/deep value, small caps "
-                 "or credit-sensitive equity yet; quality value only."),
-    "PEAK_FORMING": ("Off the high but the turn is not confirmed. Watch; no cyclical adds."),
-    "RE_ENTRY_PENDING": ("Peak-and-turn met on 1 close. Confirm on the next close before acting."),
-    "RE_ENTRY": ("Spread peak confirmed. At the weekend review cyclical/deep value and small caps "
-                 "become ELIGIBLE (each still needs Level 2 flow and a Level 4 entry); re-evaluate "
-                 "duration bought for the bust as spreads normalise."),
-    "UNAVAILABLE": "HY OAS history unavailable — re-entry rule cannot be evaluated.",
-}
-
-
-def _cc_core(s: pd.Series) -> dict:
-    w = s.tail(CREDIT_LOOKBACK)
-    vals = w.to_numpy(dtype=float)
-    pos = int(vals.argmax())
-    peak = float(vals[pos])
-    trough = float(vals[: pos + 1].min())
-    cur = float(vals[-1])
-    age = len(vals) - 1 - pos
-    mom = float(s.iloc[-1] - s.iloc[-11]) if len(s) > 10 else None
-    need = max(CREDIT_RETRACE_MIN_PP, CREDIT_RETRACE_FRAC * (peak - trough))
-    off = peak - cur
-    if peak < CREDIT_EPISODE_MIN_PCT:
-        state = "NO_EPISODE"
-    elif off <= CREDIT_NEAR_PEAK_PP or age < CREDIT_PEAK_AGE_MIN:
-        state = "WIDENING"
-    elif off >= need and mom is not None and mom < 0:
-        state = "TURN"
-    else:
-        state = "PEAK_FORMING"
-    return {"state": state, "peak": round(peak, 2), "peak_date": str(w.index[pos])[:10],
-            "peak_age": age, "trough": round(trough, 2), "current": round(cur, 2),
-            "retrace_needed": round(need, 2), "off_peak": round(off, 2),
-            "mom_2w": None if mom is None else round(mom, 2)}
-
-
-def credit_cycle_state(hy: Optional[pd.Series]) -> dict:
-    """Spread-peak re-entry state from the HY OAS history (percent units)."""
-    s = None if hy is None else pd.Series(hy).dropna().astype(float)
-    if s is None or len(s) < 30:
-        return {"state": "UNAVAILABLE", "action": _CC_ACTION["UNAVAILABLE"]}
-    today = _cc_core(s)
-    if today["state"] == "TURN":
-        prev = _cc_core(s.iloc[:-1])
-        today["state"] = "RE_ENTRY" if prev["state"] == "TURN" else "RE_ENTRY_PENDING"
-    today["action"] = _CC_ACTION[today["state"]]
-    if today["state"] in ("PEAK_FORMING",):
-        today["action"] += (f" Off the {today['peak']:.2f}% high by {today['off_peak']:.2f}pp of "
-                            f"{today['retrace_needed']:.2f}pp needed; 2-week change "
-                            f"{today['mom_2w']:+.2f}pp.") if today["mom_2w"] is not None else ""
-    return today
-
 
 
 # --------------------------------------------------------------------------- #
@@ -1472,63 +1318,11 @@ def selftest() -> dict:
     if key(sig(), growth={"state": "CONTRACTING", "confirmed": True, "score": -4, "detail": "t"}) != "growth_scare":
         fails.append("confirmed contraction must override tightening")
 
-    # v7: credit stress fills the 3.5%..crisis hole (was: neutral)
-    if key(sig(hy_oas=3.8, hy_oas_mom_2w=0.40)) != "credit_stress":
-        fails.append("HY 3.8% widening +0.40pp must be credit_stress, not neutral")
-    if key(sig(hy_oas=3.6, hy_oas_mom_2w=0.05), cape=30.0, top20_concentration_pct=35.0) != "neutral":
-        fails.append("HY 3.6% flat is elevated but not stress: neutral")
-    if key(sig(hy_oas=4.7, hy_oas_mom_2w=0.0)) != "credit_stress":
-        fails.append("HY 4.7% (wide) must be credit_stress even if not widening")
-    if key(sig(hy_oas=5.2, hy_oas_mom_2w=0.2)) != "credit_stress":
-        fails.append("HY 5.2% but only +0.2pp/2wk misses the crisis override -> credit_stress")
-    if key(sig(hy_oas=3.4, hy_oas_mom_2w=0.40)) != "restrictive_tightening":
-        fails.append("HY 3.4% is still the calm zone")
-    if key(sig(short_real_rate=0.10, hy_oas=3.9, hy_oas_mom_2w=0.4)) != "credit_stress":
-        fails.append("credit stress must beat the ambiguity band")
-    if key(sig(hy_oas=3.9, hy_oas_mom_2w=0.4), growth={"state": "CONTRACTING", "confirmed": True, "score": -4, "detail": "t"}) != "growth_scare":
-        fails.append("confirmed contraction still outranks credit stress")
-    if key(sig(short_real_rate=-0.6, hy_oas=3.9, hy_oas_mom_2w=0.4)) != "inflationary_repression":
-        fails.append("negative short real + rising long real keeps repression precedence")
-    _cs = target_weights("credit_stress")
-    if abs(sum(_cs.values()) - 100) > 0.5 or _cs.get("SGOV", 0) <= target_weights("neutral").get("SGOV", 0):
-        fails.append(f"credit_stress targets must sum to 100 and lift SGOV: {_cs}")
-
-    # v7: spread-peak re-entry state machine
-    import numpy as _np
-    _ix = pd.bdate_range("2026-01-01", periods=200)
-    def _hy(path):
-        return pd.Series(_np.interp(_np.arange(200), [p[0] for p in path], [p[1] for p in path]), index=_ix)
-    _cs = lambda path: credit_cycle_state(_hy(path))["state"]
-    if _cs([(0, 2.7), (199, 2.95)]) != "NO_EPISODE":
-        fails.append("calm HY must be NO_EPISODE")
-    if _cs([(0, 2.7), (190, 4.2), (199, 4.25)]) != "WIDENING":
-        fails.append("spreads at their high must be WIDENING")
-    if _cs([(0, 2.7), (150, 4.5), (199, 4.2)]) != "PEAK_FORMING":
-        fails.append("0.30pp off a 4.5% high (need 0.50) must be PEAK_FORMING")
-    if _cs([(0, 2.7), (140, 5.0), (199, 4.1)]) != "RE_ENTRY":
-        fails.append("0.9pp off a 5.0% high, falling, 2 closes must be RE_ENTRY")
-    _p = _hy([(0, 2.7), (140, 5.0), (197, 4.5), (198, 4.5), (199, 4.35)])
-    _p.iloc[-2] = 4.62      # yesterday failed the retrace test; today passes
-    if credit_cycle_state(_p)["state"] != "RE_ENTRY_PENDING":
-        fails.append(f"first qualifying close must be RE_ENTRY_PENDING: {credit_cycle_state(_p)}")
-    if _cs([(0, 2.7), (140, 5.0), (180, 4.0), (199, 4.3)]) != "PEAK_FORMING":
-        fails.append("re-widening after a retrace (2w change > 0) must not be RE_ENTRY")
-    if credit_cycle_state(None)["state"] != "UNAVAILABLE":
-        fails.append("missing HY history must be UNAVAILABLE")
-
     tw = target_weights("restrictive_tightening")
     if abs(sum(tw.values()) - 100) > 0.5:
         fails.append(f"restrictive_tightening targets sum to {sum(tw.values())}")
     if tw.get("TLT", 99) > 3 or tw.get("SGOV", 0) < 10:
         fails.append(f"tightening targets should cut TLT to ~2 and lift SGOV: {tw}")
-    # fed_reaction_flag must agree with the short real rate (Sept 2026 fix)
-    _f = lambda **k: fed_reaction_flag(SignalSet(**k))["state"]
-    if not _f(short_real_rate=0.48, long_real_yield=2.85, cpi_yoy=3.4).startswith("RESTRICTIVE"):
-        fails.append("positive short real rate must read RESTRICTIVE, not repression")
-    if not _f(short_real_rate=-0.5, long_real_yield=1.5, cpi_yoy=3.4).startswith("SOFT"):
-        fails.append("negative short real + positive long real + hot CPI must read SOFT repression")
-    if not _f(short_real_rate=-1.5, long_real_yield=0.0, cpi_yoy=4.0).startswith("HARD"):
-        fails.append("suppressed long real + hot CPI must read HARD repression")
     return {"ok": not fails, "failures": fails, "targets_restrictive_tightening": tw}
 
 
