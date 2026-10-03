@@ -1,0 +1,31 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Guardrails (Oct 2026). These repos are PUBLIC: anything committed is
+#  visible to everyone and stays in history even after deletion. Git refuses
+#  to add files matching these patterns unless forced (git add -f).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Secrets — API keys and tokens belong in Streamlit secrets / GitHub
+# Actions secrets, never in a file in the repo.
+.streamlit/secrets.toml
+**/.streamlit/secrets.toml
+.env
+.env.*
+*.env
+*.pem
+*.key
+
+# Personal financial records — statements, broker exports, tax forms.
+*statement*.csv
+*statement*.pdf
+*statement*.xlsx
+*brokerage*.csv
+*brokerage*.pdf
+*brokerage*.xlsx
+*account_export*
+*positions_export*
+*1099*
+*tax_return*
+
+# Python clutter
+__pycache__/
+*.pyc

@@ -38,9 +38,9 @@ jobs:
   poll_and_publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"   # match Streamlit Cloud; 3.11 broke cross_asset.py (Sept 2026)
           cache: pip
