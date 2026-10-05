@@ -1,5 +1,5 @@
 """
-regime_classifier.py  (v3 — July 2026 band/guard patch; v8 Oct 2026: growth_scare needs price confirmation)
+regime_classifier.py  (v3 — July 2026 band/guard patch)
 =======================================================
 
 v3 CHANGELOG (vs v2):
@@ -928,25 +928,10 @@ def classify_regime(sig: SignalSet, fetch_prices: Callable = None,
     g_state = (growth or {}).get("state")
     g_confirmed = bool((growth or {}).get("confirmed"))
     if growth and g_confirmed and g_state == "CONTRACTING":
-        # v8 (Oct 2026): PRICE MUST AGREE. The composite is monthly, lagged,
-        # labour/consumer-only and scored with a downside lean, so it can
-        # read CONTRACTING while output and the tape are fine (Oct 2026:
-        # composite 0 while GDPNow +3.7% on capex). Acting then would cut the
-        # very sectors carrying growth. Only price can veto: unwired or
-        # unavailable price data ACTS on the macro read (fail toward
-        # protection — cuts are never gated elsewhere either).
-        _gpc = growth_price_confirmation(fetch_prices)
-        _gtxt = (f"Growth composite CONTRACTING "
-                 f"({(growth or {}).get('score', 0):+d}) — "
-                 f"{(growth or {}).get('detail', '')[:160]}")
-        if _gpc["confirms"] is False:
-            drivers.append(f"⚠ {_gtxt} — but PRICE DOES NOT CONFIRM "
-                           f"({_gpc['detail']}). Warning only: not acting on "
-                           f"economic data the tape disagrees with.")
-        else:
-            drivers.append(_gtxt)
-            drivers.append(_gpc["detail"])
-            return _regime("growth_scare", drivers)
+        drivers.append(f"Growth composite CONTRACTING "
+                       f"({(growth or {}).get('score', 0):+d}) — "
+                       f"{(growth or {}).get('detail', '')[:160]}")
+        return _regime("growth_scare", drivers)
     if growth and not g_confirmed and g_state == "CONTRACTING":
         drivers.append("⚠ Growth reads CONTRACTING but is UNCONFIRMED "
                        "(<3 of 4 series live) — not acting on it.")
@@ -1191,72 +1176,6 @@ _TRANSITION_VARIANTS = {
                  "leadership stabilizes."),
     },
 }
-
-
-# --------------------------------------------------------------------------- #
-#  v8: price confirmation for growth_scare
-# --------------------------------------------------------------------------- #
-GROWTH_PC_CYCLICALS = ("XLY", "XLI", "XLF")
-GROWTH_PC_DEFENSIVES = ("XLP", "XLU", "XLV")
-GROWTH_PC_SPREAD_PP = -3.0      # cyclicals vs defensives, 20 sessions
-GROWTH_PC_LOOKBACK = 20
-
-
-def growth_price_confirmation(fetch_prices: Callable = None) -> dict:
-    """Does the tape agree that growth is contracting?
-
-    Confirms when EITHER
-      - SPY closes below its 200-day average (the broad trend has broken), or
-      - cyclicals (XLY/XLI/XLF) trail defensives (XLP/XLU/XLV) by 3pp or more
-        over 20 sessions (the market is pricing a slowdown by rotation).
-    Returns {"confirms": True|False|None, "available": bool, "detail": str}.
-    confirms=None means no usable price data -> the caller acts on the macro
-    read (fail toward protection) and says so.
-    """
-    if fetch_prices is None:
-        return {"confirms": None, "available": False,
-                "detail": "⚠ Price confirmation not wired (fetch_prices=None) — "
-                          "acting on the growth composite alone."}
-
-    def _px(t):
-        try:
-            s = fetch_prices(t, "1y")
-            s = pd.Series(s).astype(float).dropna() if s is not None else pd.Series(dtype=float)
-            return s
-        except Exception:
-            return pd.Series(dtype=float)
-
-    parts, votes = [], []
-    spy = _px("SPY")
-    if len(spy) >= 200:
-        ma200 = float(spy.tail(200).mean())
-        last = float(spy.iloc[-1])
-        below = last < ma200
-        votes.append(below)
-        parts.append(f"SPY {last:.2f} {'below' if below else 'above'} 200d {ma200:.2f}")
-
-    def _ret(t):
-        s = _px(t)
-        if len(s) <= GROWTH_PC_LOOKBACK:
-            return None
-        return (float(s.iloc[-1]) / float(s.iloc[-1 - GROWTH_PC_LOOKBACK]) - 1) * 100
-
-    cyc = [r for r in (_ret(t) for t in GROWTH_PC_CYCLICALS) if r is not None]
-    dfn = [r for r in (_ret(t) for t in GROWTH_PC_DEFENSIVES) if r is not None]
-    if len(cyc) >= 2 and len(dfn) >= 2:
-        spread = sum(cyc) / len(cyc) - sum(dfn) / len(dfn)
-        rot = spread <= GROWTH_PC_SPREAD_PP
-        votes.append(rot)
-        parts.append(f"cyclicals vs defensives {spread:+.1f}pp over {GROWTH_PC_LOOKBACK}d "
-                     f"(confirms at ≤ {GROWTH_PC_SPREAD_PP:+.0f}pp)")
-
-    if not votes:
-        return {"confirms": None, "available": False,
-                "detail": "⚠ Price confirmation unavailable (no SPY/sector data) — "
-                          "acting on the growth composite alone."}
-    ok = any(votes)
-    return {"confirms": ok, "available": True,
-            "detail": ("Price confirms: " if ok else "") + "; ".join(parts)}
 
 
 def _regime(key: str, drivers: list, reason: str | None = None) -> dict:
@@ -1804,35 +1723,6 @@ def selftest() -> dict:
     # growth contraction dominates
     if key(sig(), growth={"state": "CONTRACTING", "confirmed": True, "score": -4, "detail": "t"}) != "growth_scare":
         fails.append("confirmed contraction must override tightening")
-    # v8: price must agree before growth_scare acts
-    _G4 = {"state": "CONTRACTING", "confirmed": True, "score": -4, "detail": "t"}
-    _idx = pd.bdate_range("2025-01-01", periods=260)
-
-    def _fp_maker(spy_trend, cyc_20d, dfn_20d):
-        def _fp(t, period="1y"):
-            if t == "SPY":
-                return pd.Series(np.linspace(100, 100 * (1 + spy_trend), 260), index=_idx)
-            r = cyc_20d if t in GROWTH_PC_CYCLICALS else dfn_20d if t in GROWTH_PC_DEFENSIVES else 0.0
-            base = np.full(260, 100.0)
-            base[-21:] = np.linspace(100, 100 * (1 + r / 100), 21)
-            return pd.Series(base, index=_idx)
-        return _fp
-    _tape_ok = _fp_maker(0.20, 1.0, 0.5)          # uptrend, cyclicals leading
-    _tape_rot = _fp_maker(0.20, -3.0, 1.0)        # uptrend but -4pp rotation
-    _tape_brk = _fp_maker(-0.20, 0.0, 0.0)        # SPY below 200d
-    if classify_regime(sig(), fetch_prices=_tape_ok, growth=_G4)["key"] == "growth_scare":
-        fails.append("contraction with a healthy tape must NOT act (warning only)")
-    _r = classify_regime(sig(), fetch_prices=_tape_ok, growth=_G4)
-    if not any("PRICE DOES NOT CONFIRM" in d for d in _r["drivers"]):
-        fails.append("unconfirmed contraction must be surfaced as a warning driver")
-    if classify_regime(sig(), fetch_prices=_tape_rot, growth=_G4)["key"] != "growth_scare":
-        fails.append("defensive rotation of 4pp must confirm growth_scare")
-    if classify_regime(sig(), fetch_prices=_tape_brk, growth=_G4)["key"] != "growth_scare":
-        fails.append("SPY below 200d must confirm growth_scare")
-    if classify_regime(sig(), fetch_prices=lambda t, p="1y": pd.Series(dtype=float), growth=_G4)["key"] != "growth_scare":
-        fails.append("unavailable price data must fail toward protection (act)")
-    if classify_regime(sig(hy_oas=3.9, hy_oas_mom_2w=0.4), fetch_prices=_tape_ok, growth=_G4)["key"] != "credit_stress":
-        fails.append("vetoed growth_scare must fall through to credit_stress")
 
     # v7: credit stress fills the 3.5%..crisis hole (was: neutral)
     if key(sig(hy_oas=3.8, hy_oas_mom_2w=0.40)) != "credit_stress":

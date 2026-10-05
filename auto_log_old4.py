@@ -149,11 +149,7 @@ def run_daily(fred_key: str = "", force: bool = False) -> dict:
         row["_macro_flags"] = flags
         row["macro_flags"] = " | ".join(macro_flags.summary_lines(flags)).replace("**", "")
         row["macro_flag_warnings"] = " || ".join(flags["warnings"])
-        # fetch_prices arms the same price guards the other two dashboards
-        # use (goldilocks leadership guard, growth_scare price confirmation),
-        # so this log records the SAME regime they do.
         out = rc.full_assessment(fred_key, fetch_fred=fetch_fred,
-                                 fetch_prices=rc._inline_fetch_prices,
                                  **macro_flags.classifier_kwargs(flags))
         sig, reg = out["signals"], out["regime"]
         sc, km = out["repression"], out["kmlm"]
