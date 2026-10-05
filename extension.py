@@ -41,6 +41,13 @@ FLOW CROSS-READ (the part worth acting on)
   OVERSOLD   + money out  → "Falling knife — money still leaving"
   This is display-only. Nothing here feeds the regime, the model portfolio
   or any brief.
+
+DIRECTIONAL GUIDANCE (v2, Oct 2026) — see the block above trend_state():
+  two horizons (swing 2–8 weeks, position weeks–months), each a call with a
+  size (full / half / none), a concrete entry trigger and a structure-based
+  invalidation. Trend uses the model portfolio's own entry-gate definition;
+  the model's current regime (read from the Portfolio repo's committed daily
+  log) can only DOWNGRADE a fund one notch, never upgrade it.
 """
 from __future__ import annotations
 
@@ -170,10 +177,214 @@ def _cmf(ohlcv: pd.DataFrame) -> float:
         return float("nan")
 
 
+
+# ── directional guidance (Oct 2026 v2) ──────────────────────────────────────
+#
+# Two horizons, each answering "is this a candidate, and how much?" with a
+# concrete entry trigger and a structure-based invalidation. Built ONLY from
+# price structure, extension and money direction; the model portfolio's regime
+# can DOWNGRADE a fund one notch, never upgrade it. Display only.
+#
+# TREND (identical to the model portfolio's entry gate, regime_classifier):
+#   UPTREND    close > rising 200d (vs 21 sessions ago) AND > 50d
+#   PULLBACK   close > rising 200d, < 50d
+#   DOWNTREND  anything else (below the 200d, or above a FALLING 200d)
+#
+# POSITION (weeks–months) — trend first, then money:
+#   UPTREND   + money not leaving  → Candidate · full   (half if OVERBOUGHT: scale in)
+#   UPTREND   + money leaving      → Hold — don't add
+#   PULLBACK  + money not leaving  → Candidate · half   (rest on a 50d reclaim)
+#   PULLBACK  + money leaving      → Watch
+#   DOWNTREND                      → Avoid  (trigger: close above a flat/rising 200d)
+#   Invalidation: a close below the 200-day.
+#
+# SWING (2–8 weeks) — trade with the trend, buy weakness, not strength:
+#   UPTREND   + dip (EXTENDED↓/OVERSOLD), money not leaving → Candidate · full
+#   UPTREND   + NEUTRAL, money arriving                     → Candidate · full
+#   UPTREND   + NEUTRAL, money flat/unknown                 → Candidate · half
+#   UPTREND   + EXTENDED↑, money arriving                   → Candidate · half
+#   UPTREND   + OVERBOUGHT, money arriving                  → Don't chase (wait for 20d)
+#   UPTREND   + OVERBOUGHT, money leaving                   → Avoid — stretched, distribution
+#   UPTREND   + anything else with money leaving            → Watch
+#   PULLBACK  + dip + money arriving                        → Candidate · half (on 20d reclaim)
+#   PULLBACK  + money not leaving                           → Watch (trigger: 50d reclaim)
+#   PULLBACK  + money leaving                               → Avoid
+#   DOWNTREND + OVERSOLD + money arriving                   → Watch — counter-trend
+#   DOWNTREND otherwise                                     → Avoid
+#   Invalidation: a close below the 10-session swing low.
+#
+# NOTCHES: 3 Candidate·full · 2 Candidate·half · 1 Watch / Don't chase / Hold
+#          · 0 Avoid. A regime that TRIMS the fund drops it one notch.
+
+CASH_LIKE = {"SGOV", "USFR", "BIL", "SHV"}
+SLOPE_LOOKBACK = 21
+SWING_LOW_N = 10
+UPTREND, PULLBACK, DOWNTREND = "UPTREND", "PULLBACK", "DOWNTREND"
+
+G_FULL, G_HALF = "Candidate · full", "Candidate · half"
+G_WATCH, G_CHASE, G_HOLD, G_AVOID = "Watch", "Don't chase", "Hold — don't add", "Avoid"
+G_NOTCH = {G_FULL: 3, G_HALF: 2, G_WATCH: 1, G_CHASE: 1, G_HOLD: 1, G_AVOID: 0}
+G_ICON = {3: "🟢", 2: "🟡", 1: "⚪", 0: "🔴"}
+G_SIZE = {3: "full", 2: "half", 1: "none", 0: "none"}
+
+
+def trend_state(d: pd.DataFrame) -> dict:
+    """Trend + the levels the triggers and stops are written in."""
+    c = d["Close"].astype(float).dropna()
+    out = {"trend": None, "close": np.nan, "ma20": np.nan, "ma50": np.nan, "ma200": np.nan,
+           "ma200_rising": None, "swing_low": np.nan}
+    if len(c) < 200 + SLOPE_LOOKBACK:
+        return out
+    ma200 = c.rolling(200).mean()
+    last = float(c.iloc[-1])
+    m200 = float(ma200.iloc[-1])
+    rising = m200 >= float(ma200.iloc[-1 - SLOPE_LOOKBACK])
+    m50 = float(c.tail(50).mean())
+    low = d["Low"].astype(float) if "Low" in d else c
+    out.update(close=last, ma20=float(c.tail(20).mean()), ma50=m50, ma200=m200,
+               ma200_rising=rising, swing_low=float(low.tail(SWING_LOW_N).min()))
+    if last > m200 and rising and last > m50:
+        out["trend"] = UPTREND
+    elif last > m200 and rising:
+        out["trend"] = PULLBACK
+    else:
+        out["trend"] = DOWNTREND
+    return out
+
+
+def _p(v) -> str:
+    return "—" if v is None or (isinstance(v, float) and math.isnan(v)) else f"${v:,.2f}"
+
+
+def position_call(ts: dict, badge: str, flow: str) -> tuple:
+    t = ts["trend"]
+    stop = f"close below 200d {_p(ts['ma200'])}"
+    if t == UPTREND:
+        if flow == "out":
+            return G_HOLD, "no new money while flows leave", stop
+        if badge == OVERBOUGHT:
+            return G_HALF, f"half now; rest near 50d {_p(ts['ma50'])}", stop
+        return G_FULL, "now — above a rising 200d and the 50d", stop
+    if t == PULLBACK:
+        if flow == "out":
+            return G_WATCH, f"close above 50d {_p(ts['ma50'])} with money arriving", stop
+        return G_HALF, f"half now; rest on close above 50d {_p(ts['ma50'])}", stop
+    fl = "flat-or-rising " if ts["ma200_rising"] is False else ""
+    return G_AVOID, f"close above a {fl}200d {_p(ts['ma200'])}", "—"
+
+
+def swing_call(ts: dict, badge: str, flow: str) -> tuple:
+    t = ts["trend"]
+    stop = f"close below 10-day low {_p(ts['swing_low'])}"
+    dip = badge in (EXT_DN, OVERSOLD)
+    if t == UPTREND:
+        if badge == OVERBOUGHT:
+            if flow == "out":
+                return G_AVOID, "stretched while money leaves — take profits, no entry", "—"
+            return G_CHASE, f"pullback toward 20d {_p(ts['ma20'])}", "—"
+        if flow == "out":
+            return G_WATCH, "money leaving — wait for flows to turn", "—"
+        if dip:
+            return G_FULL, f"close back above 20d {_p(ts['ma20'])} (dip in uptrend)", stop
+        if badge == EXT_UP:
+            return (G_HALF, f"now, or a dip toward 20d {_p(ts['ma20'])}", stop) if flow == "in" \
+                else (G_WATCH, f"dip toward 20d {_p(ts['ma20'])}", "—")
+        return (G_FULL if flow == "in" else G_HALF), "now — uptrend, not extended", stop
+    if t == PULLBACK:
+        if flow == "out":
+            return G_AVOID, "pullback with money leaving", "—"
+        if dip and flow == "in":
+            return G_HALF, f"close above 20d {_p(ts['ma20'])}", stop
+        return G_WATCH, f"close above 50d {_p(ts['ma50'])}", "—"
+    if badge == OVERSOLD and flow == "in":
+        return G_WATCH, f"counter-trend — no entry until close above 50d {_p(ts['ma50'])}", "—"
+    return G_AVOID, "downtrend", "—"
+
+
+def _downgrade(call: tuple) -> tuple:
+    label, entry, stop = call
+    n = G_NOTCH[label]
+    if n == 0:
+        return call
+    new = {3: G_HALF, 2: G_WATCH, 1: G_AVOID}[n]
+    if new in (G_WATCH, G_AVOID):
+        stop = "—"
+    return new, entry, stop
+
+
+def guidance(ts: dict, badge: str, flow: str, ticker: str = "",
+             overlay: Optional[dict] = None) -> dict:
+    """Both horizons for one fund. overlay = current regime's {ticker: tilt}."""
+    if ticker in CASH_LIKE:
+        dash = ("— cash", "parking / dry powder (no trend gate)", "—")
+        return {"swing": dash, "position": dash, "regime_note": ""}
+    if ts.get("trend") is None:
+        na = ("— no call", "insufficient price history (needs ~221 sessions)", "—")
+        return {"swing": na, "position": na, "regime_note": ""}
+    sw, po = swing_call(ts, badge, flow), position_call(ts, badge, flow)
+    note = ""
+    tilt = (overlay or {}).get(ticker)
+    if tilt is not None and tilt < 0:
+        sw, po = _downgrade(sw), _downgrade(po)
+        note = f"regime trims {tilt:+g} → one notch down"
+    elif tilt is not None and tilt > 0:
+        note = f"regime adds {tilt:+g} (never upgrades a chart)"
+    return {"swing": sw, "position": po, "regime_note": note}
+
+
+def call_label(label: str) -> str:
+    n = G_NOTCH.get(label)
+    return f"{G_ICON[n]} {label}" if n is not None else label
+
+
+def load_regime(url: Optional[str] = None, timeout: float = 10.0) -> dict:
+    """The model portfolio's CURRENT regime + overlay, read from the Portfolio
+    repo's committed daily log (the same row the consolidated brief uses).
+    Never raises: {'key': None, ...} when unreachable, and the guidance then
+    says the regime was not applied."""
+    import os
+    url = url or os.environ.get("MODEL_LOG_URL") or MODEL_LOG_URL
+    out = {"key": None, "label": None, "asof": None, "overlay": None, "detail": ""}
+    try:
+        import requests
+        r = requests.get(url, timeout=timeout)
+        r.raise_for_status()
+        return parse_regime_log(r.text)
+    except Exception as e:
+        out["detail"] = f"regime unavailable ({type(e).__name__}) — not applied"
+    return out
+
+
+def parse_regime_log(text: str) -> dict:
+    """Latest WEEKDAY row of the Portfolio daily log -> regime + resolved overlay."""
+    out = {"key": None, "label": None, "asof": None, "overlay": None, "detail": ""}
+    try:
+        import io
+        log = pd.read_csv(io.StringIO(text))
+        log = log[pd.to_datetime(log["et_date"]).dt.dayofweek < 5].dropna(subset=["regime"])
+        row = log.iloc[-1]
+        key = str(row["regime"])
+        import regime_classifier as rc
+        sig = type("S", (), {"long_real_mom_3m": _f(row.get("long_real_mom_3m"))})()
+        if math.isnan(sig.long_real_mom_3m):
+            sig.long_real_mom_3m = None
+        ov = rc.regime_overlay(key, sig)
+        out.update(key=key, label=str(row.get("regime_label", key)), asof=str(row["et_date"]),
+                   overlay=ov, detail=f"{key} as of {row['et_date']}")
+    except Exception as e:
+        out["detail"] = f"regime unavailable ({type(e).__name__}) — not applied"
+    return out
+
+
+MODEL_LOG_URL = ("https://raw.githubusercontent.com/timothylundeen2008-web/"
+                 "Portfolio-Tracker/main/logs/daily_log.csv")
+
+
 # ── table ───────────────────────────────────────────────────────────────────
 
 def build_table(ohlcv: dict, tier_a: Optional[pd.DataFrame] = None,
-                names: Optional[dict] = None, groups: Optional[dict] = None) -> pd.DataFrame:
+                names: Optional[dict] = None, groups: Optional[dict] = None,
+                overlay: Optional[dict] = None) -> pd.DataFrame:
     """One row per fund. `ohlcv` = {ticker: DataFrame[High, Low, Close, Volume]};
     `tier_a` = flow_map.fund_flows(..., 20) output (only measurable rows used)."""
     names, groups = names or {}, groups or {}
@@ -189,13 +400,20 @@ def build_table(ohlcv: dict, tier_a: Optional[pd.DataFrame] = None,
         badge, hi, lo = classify(m["rsi14"], m["z20"], m["pct_50d_rank"])
         cmf = _cmf(d) if {"High", "Low", "Volume"} <= set(d.columns) else float("nan")
         direction, src = flow_direction(ta.get(tk), cmf)
-        rows.append({"ticker": tk, "name": names.get(tk, tk), "group": groups.get(tk, ""),
+        ts = trend_state(d)
+        g = guidance(ts, badge, direction, tk, overlay)
+        rows.append({"trend": ts["trend"], "close": ts["close"], "ma20": ts["ma20"],
+                     "ma50": ts["ma50"], "ma200": ts["ma200"], "swing_low": ts["swing_low"],
+                     "swing": g["swing"][0], "swing_entry": g["swing"][1], "swing_stop": g["swing"][2],
+                     "position": g["position"][0], "position_entry": g["position"][1],
+                     "position_stop": g["position"][2], "regime_note": g["regime_note"],
+                     **{"ticker": tk, "name": names.get(tk, tk), "group": groups.get(tk, ""),
                      "badge": badge, "tests_hi": hi, "tests_lo": lo,
                      "rsi14": m["rsi14"], "z20": m["z20"], "pct_vs_50d": m["pct_vs_50d"],
                      "pct_50d_rank": m["pct_50d_rank"], "flow_dir": direction,
                      "flow_src": src, "read": flow_read(badge, direction),
                      "asof": pd.Timestamp(d.index[-1]).date() if len(d) else None,
-                     "rows": m["rows"]})
+                     "rows": m["rows"]}})
     t = pd.DataFrame(rows)
     if t.empty:
         return t
@@ -294,7 +512,13 @@ def compute(st=None) -> Optional[pd.DataFrame]:
             names.setdefault(k, v)
     except Exception:
         pass
-    return build_table(ohlcv, tier_a, names, groups)
+    if st is not None:
+        reg = st.cache_data(ttl=3600, show_spinner=False)(load_regime)()
+    else:
+        reg = load_regime()
+    t = build_table(ohlcv, tier_a, names, groups, overlay=reg.get("overlay"))
+    t.attrs["regime"] = reg
+    return t
 
 
 # ── render ──────────────────────────────────────────────────────────────────
@@ -312,7 +536,7 @@ def _ordinal(v) -> str:
 
 
 def render(st, table: Optional[pd.DataFrame]) -> None:
-    st.markdown("## 🌡️ Overbought / oversold — and does the money agree?")
+    st.markdown("## 🌡️ Overbought / oversold, money, and what to do about it")
     if table is None or table.empty:
         st.warning("Extension table unavailable (price download failed). Try Refresh in a few minutes.")
         return
@@ -320,6 +544,15 @@ def render(st, table: Optional[pd.DataFrame]) -> None:
     c = st.columns(5)
     for col, b in zip(c, [OVERBOUGHT, EXT_UP, NEUTRAL, EXT_DN, OVERSOLD]):
         col.metric(f"{BADGE_ICON.get(b, '')} {b}".strip(), n.get(b, 0))
+
+    reg = table.attrs.get("regime") or {}
+    if reg.get("key"):
+        st.caption(f"Model regime applied: **{reg.get('label') or reg['key']}** "
+                   f"(as of {reg.get('asof')}). A fund the regime trims drops one notch; "
+                   f"the regime never upgrades a chart.")
+    else:
+        st.warning(f"Model regime not applied — {reg.get('detail', 'unavailable')}. "
+                   f"Guidance below is price + money only.")
 
     flagged = table[table["badge"].isin([OVERBOUGHT, OVERSOLD])]
     warn = table[(table["badge"] == OVERBOUGHT) & (table["flow_dir"] == "out")]
@@ -329,14 +562,30 @@ def render(st, table: Optional[pd.DataFrame]) -> None:
     watch = table[(table["badge"] == OVERSOLD) & (table["flow_dir"] == "in")]
     if not watch.empty:
         st.success("**Oversold with money arriving — run the 3-of-3:** " + ", ".join(
-            f"{r.ticker} (RSI {r.rsi14:.0f}, {r.flow_src})" for r in watch.itertuples()))
-    if flagged.empty:
-        st.info("No fund is overbought or oversold on 2-of-3 tests right now.")
+            f"{r.ticker} (RSI {r.rsi14:.0f}, {r.flow_src}; swing call: {call_label(r.swing)})"
+            for r in watch.itertuples()))
 
-    def _view(t):
+    def _why(t):
+        return [" · ".join(x for x in (str(tr).lower() if tr else "", b.lower(),
+                                        f"money {fd} ({fs})", rn) if x)
+                for tr, b, fd, fs, rn in zip(t["trend"], t["badge"], t["flow_dir"],
+                                             t["flow_src"], t["regime_note"])]
+
+    def _guid_view(t):
+        return pd.DataFrame({
+            "Fund": t["ticker"], "Name": t["name"],
+            "Swing (2–8 wk)": t["swing"].map(call_label),
+            "Swing entry": t["swing_entry"], "Swing stop": t["swing_stop"],
+            "Position (wks–mos)": t["position"].map(call_label),
+            "Position entry": t["position_entry"], "Position stop": t["position_stop"],
+            "Why": _why(t), "As of": t["asof"]})
+
+    def _ext_view(t):
         return pd.DataFrame({
             "Fund": t["ticker"], "Name": t["name"], "Theme": t["group"],
             "Status": [f"{BADGE_ICON.get(b, '')} {b}".strip() for b in t["badge"]],
+            "Swing (2–8 wk)": t["swing"].map(call_label),
+            "Position (wks–mos)": t["position"].map(call_label),
             "RSI(14)": t["rsi14"].map(lambda v: _fmt(v, "{:.0f}")),
             "Z vs 20d": t["z20"].map(lambda v: _fmt(v, "{:+.1f}")),
             "% vs 50d": t["pct_vs_50d"].map(lambda v: _fmt(v, "{:+.1f}%")),
@@ -344,19 +593,41 @@ def render(st, table: Optional[pd.DataFrame]) -> None:
             "Money": [f"{d} · {s}" for d, s in zip(t["flow_dir"], t["flow_src"])],
             "Read": t["read"], "As of": t["asof"]})
 
+    st.markdown("#### Candidates now")
+    sn = table["swing"].map(lambda x: G_NOTCH.get(x, -1))
+    pn = table["position"].map(lambda x: G_NOTCH.get(x, -1))
+    cand = table[(sn >= 2) | (pn >= 2)].assign(_s=sn.clip(lower=0) + pn.clip(lower=0))
+    cand = cand.sort_values(["_s", "ticker"], ascending=[False, True])
+    if cand.empty:
+        st.info("No fund is a candidate on either horizon right now — that is a valid answer. "
+                "Cash is a position.")
+    else:
+        st.dataframe(_guid_view(cand), use_container_width=True, hide_index=True)
+
     if not flagged.empty:
-        st.dataframe(_view(flagged), use_container_width=True, hide_index=True)
-    with st.expander(f"All funds ({len(table)}) — sorted overbought → oversold", expanded=False):
-        st.dataframe(_view(table), use_container_width=True, hide_index=True)
+        st.markdown("#### Overbought / oversold (2 of 3 tests)")
+        st.dataframe(_ext_view(flagged), use_container_width=True, hide_index=True)
+    else:
+        st.info("No fund is overbought or oversold on 2-of-3 tests right now.")
+    with st.expander(f"All funds ({len(table)}) — guidance, entries and stops", expanded=False):
+        st.dataframe(_guid_view(table), use_container_width=True, hide_index=True)
+    with st.expander(f"All funds ({len(table)}) — extension detail, sorted overbought → oversold",
+                     expanded=False):
+        st.dataframe(_ext_view(table), use_container_width=True, hide_index=True)
     st.caption(
-        "Each fund is judged against its OWN history, not against other funds or SPY. "
-        "Three tests: RSI(14) ≥ 70 / ≤ 30; price ≥ 2 standard deviations above / below its 20-day "
-        "average (outside the Bollinger band); distance from the 50-day average in the top / bottom "
-        "10% of the fund's own last year. OVERBOUGHT / OVERSOLD = 2 of 3; EXTENDED = 1 of 3. "
-        "Money: 'verified' = ETF creations/redemptions over 20 sessions (±0.5% of AUM); 'volume CMF' = "
-        "Chaikin Money Flow(21), a volume-based estimate used only where verified data isn't measurable. "
-        "Overbought with money arriving is strength (don't chase, don't sell on it alone); overbought "
-        "with money leaving is the warning. Display only — nothing here changes the model portfolio."
+        "GUIDANCE — 🟢 Candidate · full, 🟡 Candidate · half, ⚪ Watch / Don't chase / Hold — don't add "
+        "(no new money), 🔴 Avoid. Trend uses the model portfolio's own entry gate: UPTREND = above a "
+        "rising 200-day and the 50-day; PULLBACK = above a rising 200-day, below the 50-day; DOWNTREND = "
+        "anything else. Position calls follow trend, then money; invalidation is a close below the 200-day. "
+        "Swing calls buy dips in uptrends and refuse to chase extension or fight downtrends; invalidation "
+        "is a close below the 10-session low. A regime that trims the fund drops it one notch. "
+        "Check the event calendar (CPI, FOMC, earnings) before any new entry. "
+        "EXTENSION — each fund vs its OWN history: RSI(14) ≥ 70 / ≤ 30; ≥ 2 standard deviations from "
+        "its 20-day average; distance from the 50-day in the top / bottom 10% of its own last year. "
+        "OVERBOUGHT / OVERSOLD = 2 of 3; EXTENDED = 1 of 3. MONEY — 'verified' = ETF creations/"
+        "redemptions over 20 sessions (±0.5% of AUM); 'volume CMF' = Chaikin Money Flow(21), a "
+        "volume-based estimate used only where verified data isn't measurable. Display only — "
+        "nothing here changes the model portfolio."
     )
 
 
@@ -420,6 +691,59 @@ def selftest() -> dict:
     if [_ordinal(x) for x in (1, 2, 3, 11, 12, 22, 0, 100)] != \
             ["1st", "2nd", "3rd", "11th", "12th", "22nd", "0th", "100th"]:
         f.append("ordinal formatting")
+    # 8. guidance engine
+    def _ts(trend, rising=True):
+        return {"trend": trend, "close": 110.0, "ma20": 108.0, "ma50": 105.0, "ma200": 100.0,
+                "ma200_rising": rising, "swing_low": 104.0}
+    chk = [
+        (position_call(_ts(UPTREND), NEUTRAL, "in")[0], G_FULL, "pos uptrend+in"),
+        (position_call(_ts(UPTREND), OVERBOUGHT, "in")[0], G_HALF, "pos uptrend overbought scales in"),
+        (position_call(_ts(UPTREND), NEUTRAL, "out")[0], G_HOLD, "pos uptrend+out"),
+        (position_call(_ts(PULLBACK), NEUTRAL, "flat")[0], G_HALF, "pos pullback"),
+        (position_call(_ts(DOWNTREND), OVERSOLD, "in")[0], G_AVOID, "pos downtrend"),
+        (swing_call(_ts(UPTREND), OVERSOLD, "flat")[0], G_FULL, "swing dip in uptrend"),
+        (swing_call(_ts(UPTREND), OVERBOUGHT, "in")[0], G_CHASE, "swing overbought+in"),
+        (swing_call(_ts(UPTREND), OVERBOUGHT, "out")[0], G_AVOID, "swing overbought+out"),
+        (swing_call(_ts(UPTREND), NEUTRAL, "unknown")[0], G_HALF, "swing neutral, flow unknown"),
+        (swing_call(_ts(PULLBACK), EXT_DN, "in")[0], G_HALF, "swing pullback dip+in"),
+        (swing_call(_ts(PULLBACK), NEUTRAL, "out")[0], G_AVOID, "swing pullback+out"),
+        (swing_call(_ts(DOWNTREND), OVERSOLD, "in")[0], G_WATCH, "swing counter-trend watch"),
+        (swing_call(_ts(DOWNTREND), NEUTRAL, "in")[0], G_AVOID, "swing downtrend"),
+    ]
+    for got, want, name in chk:
+        if got != want:
+            f.append(f"guidance {name}: got {got}, want {want}")
+    g = guidance(_ts(UPTREND), NEUTRAL, "in", "VGT", {"VGT": -4})
+    if g["position"][0] != G_HALF or g["swing"][0] != G_HALF or "trims" not in g["regime_note"]:
+        f.append(f"regime trim must drop one notch: {g}")
+    g = guidance(_ts(PULLBACK), NEUTRAL, "out", "XLE", {"XLE": +3})
+    if g["position"][0] != G_WATCH:
+        f.append("regime add must never upgrade")
+    if guidance(_ts(UPTREND), NEUTRAL, "in", "SGOV")["swing"][0] != "— cash":
+        f.append("cash must have no trend call")
+    if _downgrade((G_HALF, "e", "s"))[2] != "—":
+        f.append("a downgrade to Watch must drop the stop")
+    if "$105.00" not in position_call(_ts(PULLBACK), NEUTRAL, "in")[1]:
+        f.append("pullback entry must name the 50d level")
+    # trend_state on real-shaped data agrees with the entry-gate definition
+    tsu = trend_state(ohlcv["AAA"])
+    if tsu["trend"] not in (UPTREND, PULLBACK, DOWNTREND) or math.isnan(tsu["swing_low"]):
+        f.append(f"trend_state must classify 340 sessions: {tsu}")
+    if trend_state(ohlcv["AAA"].tail(150))["trend"] is not None:
+        f.append("trend_state must refuse < 221 sessions")
+    # regime log parsing (weekday row, overlay resolved)
+    try:
+        import regime_classifier  # noqa: F401
+        txt = ("et_date,regime,regime_label,long_real_mom_3m\n"
+               "2026-10-02,restrictive_tightening,Restrictive,0.1\n"
+               "2026-10-03,neutral,Neutral,0.1\n")
+        rg = parse_regime_log(txt)
+        if rg["key"] != "restrictive_tightening" or not isinstance(rg["overlay"], dict):
+            f.append(f"regime log must use the latest WEEKDAY row: {rg}")
+    except ImportError:
+        pass
+    if parse_regime_log("garbage")["key"] is not None:
+        f.append("bad regime log must return key=None")
     return {"ok": not f, "failures": f}
 
 
