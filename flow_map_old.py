@@ -264,9 +264,7 @@ def _bar_chart(df: pd.DataFrame, label_col: str, length: str, title: str):
     return fig
 
 
-def render(st, store: str = "data/etf_shares_history.csv", ext: Optional[dict] = None) -> Optional[dict]:
-    """`ext` = extension.lookup() output; adds an Overbought/oversold column
-    to the fund table when present."""
+def render(st, store: str = "data/etf_shares_history.csv") -> Optional[dict]:
     st.markdown("## 🧭 Flow Map — where money is leaving and arriving")
     try:
         from etf_flow_tracker import compute_flows, ticker_quality
@@ -317,16 +315,9 @@ def render(st, store: str = "data/etf_shares_history.csv", ext: Optional[dict] =
                    "% AUM": lambda d: d["pct_aum"].map(lambda v: f"{v:+.2f}%"),
                    "Price": lambda d: d["price_chg_pct"].map(lambda v: f"{v:+.1f}%"),
                    "AUM": lambda d: d["aum"].map(lambda v: fmt_usd(v).lstrip("+"))})
-            _cols = ["ticker", "name", "group", "Net flow", "% AUM", "Price", "agreement"]
-            if ext:
-                try:
-                    from extension import badge_label
-                    t["Overbought/oversold"] = [badge_label(ext.get(x)) for x in t["ticker"]]
-                    _cols.append("Overbought/oversold")
-                except Exception:
-                    pass
             t["ticker"] = [f"{x}†" if x in HEDGE_VEHICLES else x for x in t["ticker"]]
-            st.dataframe(t[_cols + ["AUM", "sessions"]].rename(columns={
+            st.dataframe(t[["ticker", "name", "group", "Net flow", "% AUM", "Price", "agreement",
+                            "AUM", "sessions"]].rename(columns={
                                 "ticker": "Fund", "name": "Name", "group": "Theme",
                                 "agreement": "Price vs money", "sessions": "Sessions measured"}),
                          use_container_width=True, hide_index=True)

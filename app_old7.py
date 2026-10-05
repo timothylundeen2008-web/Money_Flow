@@ -117,7 +117,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Color helpers ──────────────────────────────────────────────────────────────
-RRG_EXT_RING = {"OVERBOUGHT": "#F43F5E", "OVERSOLD": "#22D3EE"}
 QUAD_COLORS = {
     "Leading":   {"bg": "#E1F5EE", "fg": "#0F6E56", "dot": "#1D9E75"},
     "Weakening": {"bg": "#FAEEDA", "fg": "#854F0B", "dot": "#BA7517"},
@@ -350,32 +349,12 @@ def _tier_a_readable() -> bool:
 # ── Flow Map (Oct 2026) — the one-read answer to "where is money going" ───────
 # Sources and destinations from verified (Tier A) ETF creations/redemptions,
 # grouped by theme with a risk-on / risk-off read. Everything below is kept.
-# Overbought / oversold (extension.py) is computed FIRST so the flow map's fund
-# table, the RRG rings and the raw table can all show the same badge.
-_ext_table, _ext_lk = None, {}
-try:
-    import extension as _ext
-    with st.spinner("Checking which funds are overbought / oversold…"):
-        _ext_table = _ext.compute(st)
-    _ext_lk = _ext.lookup(_ext_table)
-except Exception as _ext_e:
-    _ext = None
-    print(f"[extension] unavailable: {type(_ext_e).__name__}: {_ext_e}")
-
 try:
     import flow_map as _flow_map
-    _flow_map.render(st, ext=_ext_lk)
+    _flow_map.render(st)
 except Exception as _fm_e:
     st.warning(f"Flow map unavailable: {type(_fm_e).__name__}: {_fm_e}")
 st.markdown("---")
-
-# ── Overbought / oversold vs money flow (Oct 2026) ───────────────────────────
-if _ext is not None:
-    try:
-        _ext.render(st, _ext_table)
-    except Exception as _er_e:
-        st.warning(f"Overbought panel unavailable: {type(_er_e).__name__}: {_er_e}")
-    st.markdown("---")
 
 # ── KPI metric cards ───────────────────────────────────────────────────────────
 st.markdown('<div class="section-label">Market rotation overview</div>', unsafe_allow_html=True)
@@ -512,23 +491,6 @@ with col_rrg:
         if stealth != "None":
             label_text += " 🔍"
 
-        # Overbought / oversold ring (2-of-3 tests only) — decorates, never moves the dot
-        _xr = _ext_lk.get(row["ticker"])
-        _xb = _xr["badge"] if _xr is not None else None
-        if _xb in ("OVERBOUGHT", "OVERSOLD"):
-            fig_rrg.add_trace(go.Scatter(
-                x=[rx], y=[ry], mode="markers", hoverinfo="skip", showlegend=False,
-                marker=dict(size=marker_size + 14, color="rgba(0,0,0,0)", symbol="circle",
-                            line=dict(color=RRG_EXT_RING[_xb], width=3)),
-            ))
-            label_text += " ▲" if _xb == "OVERBOUGHT" else " ▼"
-        _ext_hover = ""
-        if _xr is not None:
-            _ext_hover = (f"<br>Extension: {_xb} · RSI {_xr['rsi14']:.0f}"
-                          if pd.notna(_xr["rsi14"]) else f"<br>Extension: {_xb}")
-            if _xr["read"]:
-                _ext_hover += f"<br>{_xr['read']}"
-
         fig_rrg.add_trace(go.Scatter(
             x=[rx], y=[ry],
             mode="markers+text",
@@ -550,7 +512,6 @@ with col_rrg:
                 f"Direction: {direction} {arrow_emoji}<br>"
                 f"Spread: {fmt_pct(row['spread'])}<br>"
                 f"Stealth: {stealth}"
-                f"{_ext_hover}"
                 f"<extra></extra>"
             ),
             showlegend=False,
@@ -576,8 +537,6 @@ with col_rrg:
       <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#E24B4A;margin-right:4px"></span>Lagging</span>
       <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#378ADD;margin-right:4px"></span>Improving ★</span>
       <span style="color:#6b7280">Arrows show rotation direction · 🔍 = Stealth Accumulation</span>
-      <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid #F43F5E;margin-right:4px"></span>▲ Overbought ring</span>
-      <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid #22D3EE;margin-right:4px"></span>▼ Oversold ring</span>
     </div>""", unsafe_allow_html=True)
 
     # RS-Ratio 100 explanation
@@ -826,12 +785,8 @@ with st.expander("📋 Raw data table"):
         "rs_ratio", "rs_momentum", "spread",
         "perf_1d", "perf_1w", "perf_1m", "perf_3m", "perf_6m", "perf_1y", "perf_ytd",
     ]
-    _raw = df[display_cols].copy()
-    _raw.insert(4, "extension", [
-        (_ext.badge_label(_ext_lk.get(t)) if _ext is not None else "—") for t in df["ticker"]])
-    display_cols = list(_raw.columns)
     st.dataframe(
-        _raw[display_cols].rename(columns={"extension": "Overbought/oversold",
+        df[display_cols].rename(columns={
             "sector": "Sector", "ticker": "ETF", "quadrant": "Quadrant",
             "rotation_direction": "Direction", "stealth_signal": "Stealth",
             "rs_ratio": "RS-Ratio", "rs_momentum": "RS-Momentum", "spread": "Spread",
@@ -847,7 +802,7 @@ with st.expander("📋 Raw data table"):
     )
     st.download_button(
         "⬇ Download CSV",
-        _raw[display_cols].to_csv(index=False),
+        df[display_cols].to_csv(index=False),
         file_name=f"rotation_{_et_date_str()}.csv",
         mime="text/csv",
     )
