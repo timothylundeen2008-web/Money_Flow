@@ -280,9 +280,7 @@ def render(st, store: str = "data/etf_shares_history.csv", ext: Optional[dict] =
     view = c2.radio("View", ["By theme", "By fund"], horizontal=True, key="fm_view")
     length = c3.radio("Bar length", ["$", "% of AUM"], horizontal=True, key="fm_len")
     m = build(flows, window, ticker_quality)
-    # Escape "$": Streamlit markdown treats a pair of dollar signs as LaTeX, which
-    # turned "-$1.91B ... +$645M" into italic math (caught Oct 2026).
-    st.markdown(m["headline"].replace("$", "\\$"))
+    st.markdown(m["headline"])
 
     rs = m["risk"]
     k1, k2, k3 = st.columns(3)

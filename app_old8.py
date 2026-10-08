@@ -43,7 +43,7 @@ from data_fetcher import fetch_sector_data, get_cache_age_minutes
 from valuation import fetch_valuation_data, VALUATION_COLORS
 from top_movers import (
     fetch_top_movers, fetch_sector_flow_data,
-    SIGNAL_COLORS, TIER_THRESHOLDS, TIER_LABELS, PERSIST_COLORS,
+    SIGNAL_COLORS, TIER_THRESHOLDS, TIER_LABELS,
 )
 from rotation_math import (
     compute_rs_ratio,
@@ -1332,7 +1332,7 @@ with st.spinner("Loading ETF flow data…"):
 
 if movers_df is not None and not movers_df.empty:
 
-    col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns([2, 2, 1, 1, 1])
+    col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 1, 1])
     with col_f1:
         cats = ["All"] + sorted(movers_df["category"].unique().tolist())
         cat_filter = st.selectbox("Filter by category", cats, key="mover_cat",
@@ -1349,12 +1349,6 @@ if movers_df is not None and not movers_df.empty:
             "🔊 Vol Spike Filter", value=False, key="vol_spike_filter",
             help="Show only ETFs whose 5-day avg volume >= tier-appropriate threshold vs prior 20-day baseline"
         )
-    with col_f5:
-        sustained_only = st.toggle(
-            "⏱ Sustained only", value=False, key="sustained_filter",
-            help="Show only funds whose Accumulation score has held at or above its hurdle "
-                 "(+40 liquid / +50 thin) on at least 3 of the last 5 sessions, including today"
-        )
 
     if top_n != 10:
         movers_df = _annotate_tier_a(fetch_top_movers(top_n=top_n))
@@ -1367,11 +1361,6 @@ if movers_df is not None and not movers_df.empty:
     if vol_spike_only:
         # [CRITICAL FIX] Use per-ticker tier threshold, not hardcoded 1.5x
         display_df = display_df[display_df["vol_spike"] == True]
-    if sustained_only and "persist_status" in display_df.columns:
-        display_df = display_df[display_df["persist_status"] == "SUSTAINED"]
-        if display_df.empty:
-            st.info("No fund in this list has sustained accumulation (≥ hurdle on 3 of the last "
-                    "5 sessions). Widen 'Show top' to 20 to check the rest of the ranking.")
 
     if vol_spike_only:
         spike_count = len(display_df)
@@ -1452,28 +1441,6 @@ if movers_df is not None and not movers_df.empty:
 
         accum_val = row.get("accumulation_score", float("nan"))
         accum_display = f"{accum_val:.0f}" if pd.notna(accum_val) else "—"
-        # Persistence: last 10 sessions of the same score, recomputed from bars.
-        _hist = row.get("acc_hist")
-        _hist = list(_hist) if isinstance(_hist, (list, tuple, np.ndarray)) else []
-        _hurdle = float(row.get("persist_hurdle", 40) or 40)
-        _pstat = row.get("persist_status", "—") or "—"
-        _pcol = PERSIST_COLORS.get(_pstat, "#6b7280")
-        _bars = ""
-        for _hv in _hist:
-            if _hv != _hv:
-                _bars += '<div style="width:4px;height:2px;background:#374151"></div>'
-                continue
-            _hgt = max(2, min(18, abs(_hv) / 100 * 18))
-            _c = "#1D9E75" if _hv >= _hurdle else "#378ADD" if _hv > 0 else "#D85A30"
-            _bars += (f'<div style="width:4px;height:{_hgt:.0f}px;background:{_c};'
-                      f'border-radius:1px" title="{_hv:.0f}"></div>')
-        persist_html = (
-            f'<div style="display:flex;align-items:flex-end;justify-content:center;gap:1px;'
-            f'height:18px;margin-top:3px">{_bars}</div>'
-            f'<div style="font-size:9px;color:#6b7280;margin-top:2px">'
-            f'≥{_hurdle:.0f}: {int(row.get("persist_days", 0) or 0)}/{int(row.get("persist_of", 0) or 0)}</div>'
-            f'<div style="font-size:9px;font-weight:700;color:{_pcol}">{_pstat}</div>'
-        ) if _hist else ""
         event_val = row.get("event_score", 0.0)
 
         st.markdown(f"""
@@ -1529,11 +1496,10 @@ if movers_df is not None and not movers_df.empty:
             </div>
           </div>
 
-          <div style="flex:0 0 78px;text-align:center">
+          <div style="flex:0 0 65px;text-align:center">
             <div style="font-size:9px;color:#6b7280;margin-bottom:1px">ACCUM</div>
             <div style="font-size:17px;font-weight:700;color:{sig_fg}">{accum_display}</div>
             <div style="font-size:9px;color:#6b7280">#{rank} of {total_movers}</div>
-            {persist_html}
           </div>
 
         </div>
@@ -1577,31 +1543,6 @@ if movers_df is not None and not movers_df.empty:
         (Buying / Selling / Two-sided) comes from where price closed within
         that session's range — the money-flow multiplier — not from the
         trailing month's sign.
-
-        ---
-
-        ### Persistence — "strong accumulation for how long?"
-
-        Under each ACCUM score: the same score for each of the **last 10 sessions**
-        (bars, oldest → newest), recomputed from price and volume history — not
-        from a log, so it is complete from day one. Green bar = at or above the
-        hurdle; blue = positive but below it; orange = negative.
-
-        **Hurdle:** +40 for Tier 1–2 funds, +50 for Tier 3–4 (thin funds' money-flow
-        readings are noisier). About 15 points come free for being quiet, so
-        anything under ~+25 is noise. Calibrated from the formula, not backtested.
-
-        | Status | Rule | Action |
-        |---|---|---|
-        | **SUSTAINED** | today ≥ hurdle AND ≥ 3 of the last 5 sessions ≥ hurdle | Setup met — take it to the guidance panel for the entry |
-        | **BUILDING** | today ≥ hurdle, fewer than 3 of 5 | Watch — not yet persistent |
-        | **FADING** | today < hurdle after ≥ 3 of the last 10 ≥ hurdle | Stop adding; keep the stop |
-        | **DISTRIBUTING** | ≥ 3 of the last 5 sessions ≤ −25 | Exit watch — let the stop do the exiting |
-
-        Confirmation still matters: ✅ Tier A (verified creations/redemptions)
-        means real dollars; without it, treat a SUSTAINED read as a candidate at
-        half size at most. Rank (#1 of 10) is relative — the list is always ten
-        names long; the absolute score and its persistence are what count.
 
         ---
 

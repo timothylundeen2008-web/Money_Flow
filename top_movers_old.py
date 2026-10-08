@@ -1,4 +1,4 @@
-# VERSION: v5-20261008 (accumulation persistence)
+# VERSION: v4-20260721
 """
 top_movers.py  (v4 — directional volume via flow_metrics)
 ────────────────────────────────────────────────────────────────────
@@ -293,76 +293,6 @@ def _attach_flow_metrics(rec, ohlcv):
     return rec
 
 
-# ── Persistence (Oct 2026) ────────────────────────────────────────────────────
-# "Strong accumulation for how long?" The score is a pure function of price/
-# volume bars, so its value on each of the last N sessions can be RECOMPUTED
-# exactly by truncating the history -- no daily log, no ephemeral-disk risk,
-# and it works on day one. Hurdles are calibrated from the formula (≈15 pts
-# come free for being quiet), not backtested:
-#   Tier 1-2 (liquid)  +40      Tier 3-4 (thin, noisier CMF)  +50
-#   SUSTAINED     today ≥ hurdle AND ≥ 3 of the last 5 sessions ≥ hurdle  → setup
-#   BUILDING      today ≥ hurdle, fewer than 3 of 5                       → watch
-#   FADING        today < hurdle after ≥ 3 of the last 10 ≥ hurdle        → stop adding
-#   DISTRIBUTING  ≥ 3 of the last 5 sessions ≤ −25                        → exit watch
-PERSIST_N = 10
-PERSIST_HURDLE = {1: 40.0, 2: 40.0, 3: 50.0, 4: 50.0}
-DIST_LEVEL = -25.0
-PERSIST_COLORS = {"SUSTAINED": "#1D9E75", "BUILDING": "#378ADD", "FADING": "#BA7517",
-                  "DISTRIBUTING": "#D85A30", "—": "#6b7280"}
-
-
-def accumulation_history(ohlcv, tier_threshold: float, n: int = PERSIST_N) -> list:
-    """Accumulation score on each of the last n sessions, oldest -> newest.
-    NaN where that day's truncated history is too short to score."""
-    from flow_metrics import accumulation_score
-    out = []
-    if ohlcv is None or len(ohlcv) == 0:
-        return [float("nan")] * n
-    for k in range(n - 1, -1, -1):
-        d = ohlcv.iloc[:len(ohlcv) - k] if k else ohlcv
-        if len(d) < 63:
-            out.append(float("nan"))
-            continue
-        try:
-            vr = _vol_ratio(d["Volume"])
-            out.append(float(accumulation_score(d["High"], d["Low"], d["Close"], d["Volume"],
-                                                vr, tier_threshold)))
-        except Exception:
-            out.append(float("nan"))
-    return out
-
-
-def persistence(hist: list, hurdle: float) -> dict:
-    """Status + counts from a score history (oldest -> newest)."""
-    h = [x for x in hist]
-    valid = [x for x in h if x == x]
-    res = {"status": "—", "days_ge": 0, "of": len(valid), "last5_ge": 0,
-           "below0_last5": 0, "streak": 0, "hurdle": hurdle}
-    if not valid or h[-1] != h[-1]:
-        return res
-    last5 = [x for x in h[-5:] if x == x]
-    res["days_ge"] = sum(1 for x in valid if x >= hurdle)
-    res["last5_ge"] = sum(1 for x in last5 if x >= hurdle)
-    res["below0_last5"] = sum(1 for x in last5 if x < 0)
-    streak = 0
-    for x in reversed(h):
-        if x == x and x >= hurdle:
-            streak += 1
-        else:
-            break
-    res["streak"] = streak
-    today = h[-1]
-    if sum(1 for x in last5 if x <= DIST_LEVEL) >= 3:
-        res["status"] = "DISTRIBUTING"
-    elif today >= hurdle and res["last5_ge"] >= 3:
-        res["status"] = "SUSTAINED"
-    elif today >= hurdle:
-        res["status"] = "BUILDING"
-    elif res["days_ge"] >= 3:
-        res["status"] = "FADING"
-    return res
-
-
 # ── Main fetch ─────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -406,15 +336,6 @@ def fetch_top_movers(top_n=10):
         rec["signal"]         = _signal_label(pd.Series(rec))
         sc = SIGNAL_COLORS.get(rec["signal"], ("#888780", "#1e2330"))
         rec["signal_fg"], rec["signal_bg"] = sc[0], sc[1]
-        # Persistence: the same score, recomputed for each of the last 10 sessions.
-        hist = accumulation_history(_LAST_OHLCV.get(ticker), threshold)
-        if hist and rec.get("accumulation_score") == rec.get("accumulation_score"):
-            hist[-1] = float(rec["accumulation_score"])   # today = exactly what the card shows
-        pz = persistence(hist, PERSIST_HURDLE[tier])
-        rec.update({"acc_hist": hist, "persist_status": pz["status"],
-                    "persist_days": pz["days_ge"], "persist_of": pz["of"],
-                    "persist_last5": pz["last5_ge"], "persist_streak": pz["streak"],
-                    "persist_below0_5": pz["below0_last5"], "persist_hurdle": pz["hurdle"]})
         records.append(rec)
 
     if not records: return pd.DataFrame()
@@ -460,47 +381,3 @@ def fetch_sector_flow_data():
         records.append(rec)
 
     return pd.DataFrame(records) if records else pd.DataFrame()
-
-
-# ── selftest ───────────────────────────────────────────────────────────────────
-
-def selftest() -> dict:
-    """Persistence rules + exact reproduction of a past day's score."""
-    f = []
-    P = persistence
-    if P([10, 20, 45, 50, 48, 52, 47, 41, 44, 46], 40)["status"] != "SUSTAINED":
-        f.append("3+ of last 5 at hurdle incl. today must be SUSTAINED")
-    if P([10] * 9 + [45], 40)["status"] != "BUILDING":
-        f.append("today only must be BUILDING")
-    if P([50] * 4 + [30] * 6, 40)["status"] != "FADING":
-        f.append("below hurdle after 3+ of 10 must be FADING")
-    if P([0] * 5 + [-30, -30, -40, 10, -26], 40)["status"] != "DISTRIBUTING":
-        f.append("3 of last 5 ≤ -25 must be DISTRIBUTING")
-    if P([float("nan")] * 10, 40)["status"] != "—":
-        f.append("no data must be '—'")
-    r = P([10, 20, 45, 50, 48, 52, 47, 41, 44, 46], 40)
-    if (r["days_ge"], r["last5_ge"], r["streak"]) != (8, 5, 8):
-        f.append(f"counts wrong: {r}")
-    from flow_metrics import accumulation_score
-    idx = pd.bdate_range("2026-01-01", periods=140)
-    rng = np.random.default_rng(3)
-    c = 100 * np.exp(np.cumsum(rng.normal(0.0, 0.01, 140)))
-    hi, lo = c * 1.01, c * 0.99
-    cl = lo + rng.uniform(0, 1, 140) * (hi - lo)
-    d = pd.DataFrame({"High": hi, "Low": lo, "Close": cl,
-                      "Volume": rng.integers(1_000_000, 3_000_000, 140).astype(float)}, idx)
-    h = accumulation_history(d, 1.5)
-    k = d.iloc[:-3]
-    want = accumulation_score(k.High, k.Low, k.Close, k.Volume, _vol_ratio(k.Volume), 1.5)
-    if len(h) != PERSIST_N or abs(h[-4] - want) > 1e-9:
-        f.append(f"history must reproduce the score 3 sessions ago: {h[-4]} vs {want}")
-    if not all(x != x for x in accumulation_history(d.iloc[:60], 1.5)):
-        f.append("under 63 bars must be NaN, never a truncated-window score")
-    return {"ok": not f, "failures": f}
-
-
-if __name__ == "__main__":
-    _r = selftest()
-    print("top_movers selftest:", "PASS" if _r["ok"] else "FAIL")
-    for _x in _r["failures"]:
-        print("  -", _x)
