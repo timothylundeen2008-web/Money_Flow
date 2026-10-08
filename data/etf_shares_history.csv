@@ -19,6 +19,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,AMLP,242930000.0,52.28,thirdparty_stockanalysis,257121386.0,5.84
 2026-10-06,AMLP,242930000.0,52.5999,thirdparty_stockanalysis,239907790.0,1.24
 2026-10-07,AMLP,241030000.0,52.7575,thirdparty_stockanalysis,239191125.0,0.76
+2026-10-08,AMLP,240980000.0,52.7575,thirdparty_stockanalysis,239191125.0,0.74
 2026-09-10,DBA,45734026.24527654,29.11,aum_implied,,
 2026-09-11,DBA,45891675.42226818,29.01,aum_implied,,
 2026-09-12,DBA,45484028.15169115,29.27,aum_implied,,
@@ -39,6 +40,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,DBA,43200000.0,28.12,thirdparty_stockanalysis,47344150.0,9.59
 2026-10-06,DBA,43200000.0,28.21,thirdparty_stockanalysis,48077295.0,11.29
 2026-10-07,DBA,43200000.0,28.43,thirdparty_stockanalysis,47705258.0,10.43
+2026-10-08,DBA,43200000.0,28.43,thirdparty_stockanalysis,47705258.0,10.43
 2026-08-05,EEM,752400000.0,66.0,,,
 2026-08-07,EEM,752400000.0,65.0199966430664,,,
 2026-08-10,EEM,752400000.0,65.16999816894531,yfinance,,
@@ -73,6 +75,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,EEM,463500000.0,67.13437,thirdparty_stockanalysis,464844476.0,0.29
 2026-10-06,EEM,463500000.0,67.79771,thirdparty_stockanalysis,458295684.0,1.12
 2026-10-07,EEM,463500000.0,68.98784,thirdparty_stockanalysis,450389487.0,2.83
+2026-10-08,EEM,463500000.0,68.98784,thirdparty_stockanalysis,450389487.0,2.83
 2026-09-10,EFA,736419206.9834257,107.70645,aum_implied,,
 2026-09-11,EFA,743883705.4529177,106.62567,aum_implied,,
 2026-09-12,EFA,751267820.2566718,105.57766,aum_implied,,
@@ -93,6 +96,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,EFA,739200000.0,102.76568,thirdparty_stockanalysis,771824781.0,4.41
 2026-10-06,EFA,739200000.0,103.90828,thirdparty_stockanalysis,738146974.0,0.14
 2026-10-07,EFA,739200000.0,103.87262,thirdparty_stockanalysis,738400384.0,0.11
+2026-10-08,EFA,742200000.0,103.87262,thirdparty_stockanalysis,738400384.0,0.51
 2026-09-10,EMB,158238418.06255436,94.26618,aum_implied,,
 2026-09-11,EMB,158603387.20368454,94.04926,aum_implied,,
 2026-09-12,EMB,158603387.20368454,94.04926,aum_implied,,
@@ -113,6 +117,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,EMB,142000000.0,90.0616,thirdparty_stockanalysis,165625874.0,16.64
 2026-10-06,EMB,141400000.0,90.10445,thirdparty_stockanalysis,143477885.0,1.47
 2026-10-07,EMB,140600000.0,90.09025,thirdparty_stockanalysis,143500500.0,2.06
+2026-10-08,EMB,140900000.0,90.09025,thirdparty_stockanalysis,143500500.0,1.85
 2026-09-10,EWJ,231908620.1621672,97.82867,aum_implied,,
 2026-09-11,EWJ,233714936.5145132,97.07258,aum_implied,,
 2026-09-12,EWJ,234897742.3745477,96.58378,aum_implied,,
@@ -133,6 +138,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,EWJ,241500000.0,97.58379,thirdparty_stockanalysis,232490579.0,3.73
 2026-10-06,EWJ,244500000.0,99.00907,thirdparty_stockanalysis,237695024.0,2.78
 2026-10-07,EWJ,242550000.0,99.00751,thirdparty_stockanalysis,237698769.0,2.0
+2026-10-08,EWJ,243300000.0,99.00751,thirdparty_stockanalysis,237698769.0,2.3
 2026-09-10,FXI,120321968.62145534,35.16288,aum_implied,,
 2026-09-11,FXI,121764146.10890736,34.74641,aum_implied,,
 2026-09-12,FXI,122565543.02211928,34.51922,aum_implied,,
@@ -153,6 +159,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,FXI,115350000.0,34.05395,thirdparty_stockanalysis,124240123.0,7.71
 2026-10-06,FXI,115350000.0,33.35167,thirdparty_stockanalysis,117725964.0,2.06
 2026-10-07,FXI,115350000.0,33.94086,thirdparty_stockanalysis,115682322.0,0.29
+2026-10-08,FXI,115350000.0,33.94086,thirdparty_stockanalysis,115682322.0,0.29
 2026-08-05,GLD,260300000.0,389.6400146484375,,,
 2026-08-07,GLD,260300000.0,398.4700012207031,,,
 2026-08-10,GLD,260300000.0,402.5400085449219,yfinance,,
@@ -197,6 +204,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,GLD,352400000.0,380.61118,thirdparty_stockanalysis,401620353.0,13.97
 2026-10-06,GLD,352400000.0,384.12863,thirdparty_stockanalysis,368893134.0,4.68
 2026-10-07,GLD,352400000.0,379.6773,thirdparty_stockanalysis,373218031.0,5.91
+2026-10-08,GLD,352400000.0,379.6773,thirdparty_stockanalysis,373218031.0,5.91
 2026-09-10,HACK,27585966.256624337,110.1431,aum_implied,,
 2026-09-11,HACK,27339412.10980381,111.1364,aum_implied,,
 2026-09-12,HACK,27484406.074711826,110.5501,aum_implied,,
@@ -217,6 +225,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,HACK,27500000.0,121.7308,thirdparty_stockanalysis,24960025.0,9.24
 2026-10-06,HACK,27500000.0,122.9051,thirdparty_stockanalysis,27063093.0,1.59
 2026-10-07,HACK,27600000.0,124.8466,thirdparty_stockanalysis,26642232.0,3.47
+2026-10-08,HACK,27850000.0,124.8466,thirdparty_stockanalysis,26642232.0,4.34
 2026-08-05,HYG,195600000.0,79.55000305175781,,,
 2026-08-07,HYG,195600000.0,79.45999908447266,,,
 2026-08-10,HYG,195600000.0,79.4800033569336,yfinance,,
@@ -251,6 +260,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,HYG,214200000.0,76.66798,thirdparty_stockanalysis,211120639.0,1.44
 2026-10-06,HYG,224000000.0,76.87549,thirdparty_stockanalysis,218259477.0,2.56
 2026-10-07,HYG,232300000.0,76.80714,thirdparty_stockanalysis,218453704.0,5.96
+2026-10-08,HYG,234300000.0,76.80714,thirdparty_stockanalysis,218453704.0,6.76
 2026-09-10,IAI,7291241.785649767,193.30196,aum_implied,,
 2026-09-11,IAI,7354327.426489799,191.64381,aum_implied,,
 2026-09-12,IAI,7430476.274728449,189.67981,aum_implied,,
@@ -271,6 +281,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,IAI,7500000.0,176.21385,thirdparty_stockanalysis,7998301.0,6.64
 2026-10-06,IAI,7450000.0,175.87218,thirdparty_stockanalysis,7506231.0,0.75
 2026-10-07,IAI,7450000.0,177.72377,thirdparty_stockanalysis,7428028.0,0.29
+2026-10-08,IAI,7450000.0,177.72377,thirdparty_stockanalysis,7428028.0,0.29
 2026-08-05,IBB,69700000.0,190.1499938964844,,,
 2026-08-07,IBB,69700000.0,192.97000122070312,,,
 2026-08-10,IBB,69700000.0,200.0200042724609,yfinance,,
@@ -305,6 +316,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,IBB,53200000.0,205.90662,thirdparty_stockanalysis,50872281.0,4.38
 2026-10-06,IBB,52800000.0,205.24199,thirdparty_stockanalysis,54553400.0,3.32
 2026-10-07,IBB,51400000.0,207.9461,thirdparty_stockanalysis,53843993.0,4.75
+2026-10-08,IBB,50850000.0,207.9461,thirdparty_stockanalysis,53843993.0,5.89
 2026-09-10,IGV,153181974.0736841,102.76354,aum_implied,,
 2026-09-11,IGV,154537590.18688896,101.86209,aum_implied,,
 2026-09-12,IGV,154537590.18688896,101.86209,aum_implied,,
@@ -325,6 +337,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,IGV,130750000.0,108.15278,thirdparty_stockanalysis,145548935.0,11.32
 2026-10-06,IGV,132100000.0,108.34681,thirdparty_stockanalysis,128402531.0,2.8
 2026-10-07,IGV,132100000.0,109.74072,thirdparty_stockanalysis,126771581.0,4.03
+2026-10-08,IGV,131900000.0,109.74072,thirdparty_stockanalysis,126771581.0,3.89
 2026-09-10,IHI,67181113.0917994,51.70481,aum_implied,,
 2026-09-11,IHI,67498181.43237147,51.46193,aum_implied,,
 2026-09-12,IHI,68231677.60487351,50.90871,aum_implied,,
@@ -345,6 +358,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,IHI,67350000.0,50.62007,thirdparty_stockanalysis,68620741.0,1.89
 2026-10-06,IHI,68550000.0,50.43632,thirdparty_stockanalysis,68329563.0,0.32
 2026-10-07,IHI,67850000.0,51.59258,thirdparty_stockanalysis,66798205.0,1.55
+2026-10-08,IHI,67450000.0,51.59258,thirdparty_stockanalysis,66798205.0,0.97
 2026-09-10,INDA,137310443.06238225,49.13913,aum_implied,,
 2026-09-11,INDA,138471095.98838434,48.72725,aum_implied,,
 2026-09-12,INDA,139108811.56493285,48.50387,aum_implied,,
@@ -365,6 +379,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,INDA,124500000.0,46.38424,thirdparty_stockanalysis,145465695.0,16.84
 2026-10-06,INDA,124500000.0,46.44722,thirdparty_stockanalysis,125533489.0,0.83
 2026-10-07,INDA,123800000.0,46.60456,thirdparty_stockanalysis,125109680.0,1.06
+2026-10-08,INDA,123800000.0,46.60456,thirdparty_stockanalysis,125109680.0,1.06
 2026-09-04,ITA,61037871.19867543,223.28171,aum_implied,,
 2026-09-07,ITA,60414474.25208905,225.58568,aum_implied,,
 2026-09-08,ITA,60414474.25208905,225.58568,aum_implied,,
@@ -389,6 +404,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,ITA,58500000.0,207.9575,thirdparty_stockanalysis,65535700.0,12.03
 2026-10-06,ITA,58350000.0,207.7369,thirdparty_stockanalysis,58421270.0,0.12
 2026-10-07,ITA,58350000.0,206.85616,thirdparty_stockanalysis,58670012.0,0.55
+2026-10-08,ITA,58250000.0,206.85616,thirdparty_stockanalysis,58670012.0,0.72
 2026-08-05,IWM,281049984.0,299.7699890136719,,,
 2026-08-07,IWM,281049984.0,301.5599975585937,,,
 2026-08-10,IWM,281049984.0,299.9800109863281,yfinance,,
@@ -433,6 +449,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,IWM,280850000.0,278.86526,thirdparty_stockanalysis,288530011.0,2.73
 2026-10-06,IWM,277650000.0,281.48312,thirdparty_stockanalysis,277251890.0,0.14
 2026-10-07,IWM,280750000.0,282.89133,thirdparty_stockanalysis,275871753.0,1.74
+2026-10-08,IWM,280150000.0,282.89133,thirdparty_stockanalysis,275871753.0,1.53
 2026-09-10,IWO,39462741.46191025,376.91452,aum_implied,,
 2026-09-11,IWO,40104023.61384644,370.88748,aum_implied,,
 2026-09-12,IWO,40104023.61384644,370.88748,aum_implied,,
@@ -453,6 +470,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,IWO,39550000.0,357.33463,thirdparty_stockanalysis,41625074.0,5.25
 2026-10-06,IWO,39550000.0,360.96533,thirdparty_stockanalysis,39079284.0,1.19
 2026-10-07,IWO,39600000.0,363.3651,thirdparty_stockanalysis,38821193.0,1.97
+2026-10-08,IWO,39550000.0,363.3651,thirdparty_stockanalysis,38821193.0,1.84
 2026-06-29,KBE,22302118.0,68.184741,issuer_spdr,,
 2026-06-30,KBE,21702118.0,68.198551,issuer_spdr,,
 2026-07-01,KBE,22102118.0,69.323942,issuer_spdr,,
@@ -522,7 +540,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,KBE,23252118.0,63.215764,issuer_spdr,,
 2026-10-01,KBE,23502118.0,63.629451,issuer_spdr,,
 2026-10-02,KBE,23152118.0,64.334922,issuer_spdr,,
-2026-10-05,KBE,24152118.0,64.095439,issuer_spdr,22932995.0,5.05
+2026-10-05,KBE,24152118.0,64.095439,issuer_spdr,,
+2026-10-06,KBE,23602118.0,63.877365,issuer_spdr,22932995.0,2.84
 2026-09-04,KMLM,13598801.845748188,30.34,aum_implied,,
 2026-09-07,KMLM,13780482.56513026,29.94,aum_implied,,
 2026-09-08,KMLM,13780482.56513026,29.94,aum_implied,,
@@ -547,6 +566,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,KMLM,17700000.0,31.16,thirdparty_stockanalysis,13240939.0,25.19
 2026-10-06,KMLM,17700000.0,31.03,thirdparty_stockanalysis,17682853.0,0.1
 2026-10-07,KMLM,18050000.0,31.31,thirdparty_stockanalysis,17524719.0,2.91
+2026-10-08,KMLM,18200000.0,31.31,thirdparty_stockanalysis,17524719.0,3.71
 2026-06-29,KRE,62052585.0,74.769475,issuer_spdr,,
 2026-06-30,KRE,63352585.0,74.822572,issuer_spdr,,
 2026-07-01,KRE,67752585.0,76.167917,issuer_spdr,,
@@ -617,7 +637,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,KRE,53702585.0,69.407774,issuer_spdr,,
 2026-10-01,KRE,52052585.0,69.944678,issuer_spdr,,
 2026-10-02,KRE,50902585.0,70.76794,issuer_spdr,,
-2026-10-05,KRE,50452585.0,70.346597,issuer_spdr,52985886.0,5.02
+2026-10-05,KRE,50452585.0,70.346597,issuer_spdr,,
+2026-10-06,KRE,51402585.0,70.019074,issuer_spdr,52985886.0,3.08
 2026-09-10,LQD,303840489.3185353,105.45932,aum_implied,,
 2026-09-11,LQD,304403434.36506337,105.26429,aum_implied,,
 2026-09-12,LQD,304403434.36506337,105.26429,aum_implied,,
@@ -638,6 +659,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,LQD,276600000.0,101.97898,thirdparty_stockanalysis,314209962.0,13.6
 2026-10-06,LQD,263800000.0,101.76158,thirdparty_stockanalysis,277837799.0,5.32
 2026-10-07,LQD,263800000.0,101.72438,thirdparty_stockanalysis,277939403.0,5.36
+2026-10-08,LQD,272000000.0,101.72438,thirdparty_stockanalysis,277939403.0,2.18
 2026-06-29,MDY,39792160.0,698.01715,issuer_spdr,,
 2026-06-30,MDY,39917160.0,702.778418,issuer_spdr,,
 2026-07-01,MDY,39492160.0,696.844265,issuer_spdr,,
@@ -708,7 +730,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-01,MDY,38417392.0,663.218106,issuer_spdr,,
 2026-10-02,MDY,38392392.0,669.555393,issuer_spdr,,
 2026-10-05,MDY,38467392.0,671.435165,issuer_spdr,,
-2026-10-06,MDY,38492392.0,674.929156,issuer_spdr,37559034.0,2.42
+2026-10-06,MDY,38492392.0,674.929156,issuer_spdr,,
+2026-10-07,MDY,38442392.0,664.04842,issuer_spdr,37559034.0,2.3
 2026-09-10,OIH,4705884.022122139,428.53,aum_implied,,
 2026-09-11,OIH,4697443.466107617,429.3,aum_implied,,
 2026-09-12,OIH,4798487.793270833,420.26,aum_implied,,
@@ -729,6 +752,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,OIH,4800000.0,381.05,thirdparty_stockanalysis,5292252.0,10.26
 2026-10-06,OIH,4800000.0,382.61,thirdparty_stockanalysis,4743089.0,1.19
 2026-10-07,OIH,4800000.0,394.51,thirdparty_stockanalysis,4600018.0,4.17
+2026-10-08,OIH,4800000.0,394.51,thirdparty_stockanalysis,4600018.0,4.17
 2026-09-04,PAVE,248707121.0313076,54.3,aum_implied,,
 2026-09-07,PAVE,244918329.19840407,55.14,aum_implied,,
 2026-09-08,PAVE,244918329.19840407,55.14,aum_implied,,
@@ -753,6 +777,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,PAVE,254720000.0,53.02,thirdparty_stockanalysis,254711367.0,0.0
 2026-10-06,PAVE,254720000.0,53.87,thirdparty_stockanalysis,247927299.0,2.67
 2026-10-07,PAVE,255350000.0,54.11,thirdparty_stockanalysis,246827640.0,3.34
+2026-10-08,PAVE,255350000.0,54.11,thirdparty_stockanalysis,246827640.0,3.34
 2026-09-10,PBJ,1953186.4864864864,47.36,aum_implied,,
 2026-09-11,PBJ,1971082.7189431067,46.93,aum_implied,,
 2026-09-12,PBJ,1971082.7189431067,46.93,aum_implied,,
@@ -773,6 +798,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,PBJ,1870000.0,45.01,thirdparty_stockanalysis,2055164.0,9.9
 2026-10-06,PBJ,1870000.0,45.3,thirdparty_stockanalysis,1846866.0,1.24
 2026-10-07,PBJ,1870000.0,45.34,thirdparty_stockanalysis,1845237.0,1.32
+2026-10-08,PBJ,2290000.0,45.34,thirdparty_stockanalysis,1845237.0,19.42
 2026-09-04,PDBC,382682675.6302521,19.04,aum_implied,,
 2026-09-07,PDBC,382682675.6302521,19.04,aum_implied,,
 2026-09-08,PDBC,382682675.6302521,19.04,aum_implied,,
@@ -797,6 +823,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,PDBC,399300000.0,19.5,thirdparty_stockanalysis,373655289.0,6.42
 2026-10-06,PDBC,399300000.0,19.31,thirdparty_stockanalysis,398721763.0,0.14
 2026-10-07,PDBC,402000000.0,19.33,thirdparty_stockanalysis,398309221.0,0.92
+2026-10-08,PDBC,402300000.0,19.33,thirdparty_stockanalysis,398309221.0,0.99
 2026-09-10,PPH,9354186.454183267,110.44,aum_implied,,
 2026-09-11,PPH,9380517.134295832,110.13,aum_implied,,
 2026-09-12,PPH,9427599.48895784,109.58,aum_implied,,
@@ -817,6 +844,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,PPH,9340000.0,108.15,thirdparty_stockanalysis,9552255.0,2.27
 2026-10-06,PPH,9340000.0,108.05,thirdparty_stockanalysis,9450349.0,1.18
 2026-10-07,PPH,9540000.0,107.51,thirdparty_stockanalysis,9497816.0,0.44
+2026-10-08,PPH,9390000.0,107.51,thirdparty_stockanalysis,9497816.0,1.15
 2026-08-05,QQQ,393100000.0,717.2999877929688,,,
 2026-08-07,QQQ,393100000.0,723.030029296875,,,
 2026-08-10,QQQ,393100000.0,720.8699951171875,yfinance,,
@@ -861,6 +889,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,QQQ,676450000.0,741.88,thirdparty_stockanalysis,659110644.0,2.56
 2026-10-06,QQQ,676450000.0,749.38,thirdparty_stockanalysis,665811714.0,1.57
 2026-10-07,QQQ,672600000.0,755.9,thirdparty_stockanalysis,660068769.0,1.86
+2026-10-08,QQQ,669500000.0,755.9,thirdparty_stockanalysis,660068769.0,1.41
 2026-08-05,RING,11500000.0,72.19000244140625,,,
 2026-08-07,RING,11500000.0,78.0199966430664,,,
 2026-08-10,RING,11500000.0,78.37999725341797,yfinance,,
@@ -905,6 +934,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,RING,30250000.0,75.83568,thirdparty_stockanalysis,33179510.0,9.68
 2026-10-06,RING,30250000.0,76.61828,thirdparty_stockanalysis,30182336.0,0.22
 2026-10-07,RING,30100000.0,76.35802,thirdparty_stockanalysis,30285210.0,0.62
+2026-10-08,RING,30200000.0,76.35802,thirdparty_stockanalysis,30285210.0,0.28
 2026-09-04,SCHD,2992356862.970411,34.81,aum_implied,,
 2026-09-07,SCHD,3228081611.034483,34.8,aum_implied,,
 2026-09-08,SCHD,3228081611.034483,34.8,aum_implied,,
@@ -928,6 +958,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-01,SCHD,3318350000.0,32.66,issuer_schwab,3439597063.0,3.65
 2026-10-02,SCHD,3323300000.0,32.7,issuer_schwab,3299299691.0,0.72
 2026-10-05,SCHD,3325000000.0,32.71,issuer_schwab,3298291040.0,0.8
+2026-10-06,SCHD,3326500000.0,32.71,issuer_schwab,3298291040.0,0.85
 2026-09-04,SGOV,995543428.8528838,100.39655,aum_implied,,
 2026-09-07,SGOV,1054894875.2484156,100.46165,aum_implied,,
 2026-09-08,SGOV,1054894875.2484156,100.46165,aum_implied,,
@@ -952,6 +983,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,SGOV,1110000000.0,100.39809,thirdparty_stockanalysis,1055562708.0,4.9
 2026-10-06,SGOV,1110000000.0,100.4308,thirdparty_stockanalysis,1117780483.0,0.7
 2026-10-07,SGOV,1130000000.0,100.44072,thirdparty_stockanalysis,1117670085.0,1.09
+2026-10-08,SGOV,1130000000.0,100.44072,thirdparty_stockanalysis,1117670085.0,1.09
 2026-09-10,SKYY,21234581.61538944,159.59,aum_implied,,
 2026-09-11,SKYY,21427928.42238381,158.15,aum_implied,,
 2026-09-12,SKYY,21427928.42238381,158.15,aum_implied,,
@@ -972,6 +1004,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,SKYY,20250000.0,166.84,thirdparty_stockanalysis,20311837.0,0.31
 2026-10-06,SKYY,20250000.0,168.15,thirdparty_stockanalysis,19786139.0,2.29
 2026-10-07,SKYY,20250000.0,169.85,thirdparty_stockanalysis,19588103.0,3.27
+2026-10-08,SKYY,20250000.0,169.85,thirdparty_stockanalysis,19588103.0,3.27
 2026-08-05,SLV,341449984.0,53.84000015258789,,,
 2026-08-07,SLV,341449984.0,55.84999847412109,,,
 2026-08-10,SLV,341449984.0,59.40999984741211,yfinance,,
@@ -1006,6 +1039,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,SLV,546300000.0,55.01592,thirdparty_stockanalysis,630420255.0,15.4
 2026-10-06,SLV,546300000.0,55.11902,thirdparty_stockanalysis,543584125.0,0.5
 2026-10-07,SLV,546300000.0,55.82117,thirdparty_stockanalysis,536746619.0,1.75
+2026-10-08,SLV,546300000.0,55.82117,thirdparty_stockanalysis,536746619.0,1.75
 2026-08-05,SMH,11670900.0,575.7100219726562,,,
 2026-08-07,SMH,11670900.0,571.47998046875,,,
 2026-08-10,SMH,11670900.0,569.4099731445312,yfinance,,
@@ -1040,6 +1074,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,SMH,123090000.0,617.9,thirdparty_stockanalysis,109705503.0,10.87
 2026-10-06,SMH,123090000.0,630.61,thirdparty_stockanalysis,118741923.0,3.53
 2026-10-07,SMH,123390000.0,634.04,thirdparty_stockanalysis,118099559.0,4.29
+2026-10-08,SMH,122240000.0,634.04,thirdparty_stockanalysis,118099559.0,3.39
 2026-09-10,SOXX,79148079.86494575,528.2618,aum_implied,,
 2026-09-11,SOXX,78601453.00685392,531.93555,aum_implied,,
 2026-09-12,SOXX,78601453.00685392,531.93555,aum_implied,,
@@ -1060,6 +1095,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,SOXX,85250000.0,576.27747,thirdparty_stockanalysis,72553430.0,14.89
 2026-10-06,SOXX,84400000.0,588.83704,thirdparty_stockanalysis,82254596.0,2.54
 2026-10-07,SOXX,82900000.0,589.47577,thirdparty_stockanalysis,82165469.0,0.89
+2026-10-08,SOXX,82000000.0,589.47577,thirdparty_stockanalysis,82165469.0,0.2
 2026-07-06,SPY,1044532116.0,751.046506,issuer_spdr,,
 2026-07-07,SPY,1043282116.0,747.704983,issuer_spdr,,
 2026-07-08,SPY,1045182116.0,745.599893,issuer_spdr,,
@@ -1124,7 +1160,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,SPY,1061582116.0,762.273715,issuer_spdr,,
 2026-10-01,SPY,1070432116.0,763.775174,issuer_spdr,,
 2026-10-02,SPY,1059632116.0,769.441821,issuer_spdr,,
-2026-10-05,SPY,1056682116.0,774.554839,issuer_spdr,1044749984.0,1.13
+2026-10-05,SPY,1056682116.0,774.554839,issuer_spdr,,
+2026-10-06,SPY,1051282116.0,779.085569,issuer_spdr,1044749984.0,0.62
 2026-09-10,TIP,140289381.61978105,106.99372,aum_implied,,
 2026-09-11,TIP,140576476.65595788,106.77521,aum_implied,,
 2026-09-12,TIP,140576476.65595788,106.77521,aum_implied,,
@@ -1145,6 +1182,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,TIP,136800000.0,104.25391,thirdparty_stockanalysis,143976210.0,5.25
 2026-10-06,TIP,136000000.0,104.01741,thirdparty_stockanalysis,136802955.0,0.59
 2026-10-07,TIP,136000000.0,103.92277,thirdparty_stockanalysis,136927538.0,0.68
+2026-10-08,TIP,136000000.0,103.92277,thirdparty_stockanalysis,136927538.0,0.68
 2026-08-05,TLT,109700000.0,83.0,,,
 2026-08-07,TLT,109700000.0,82.76000213623047,,,
 2026-08-10,TLT,109700000.0,82.05999755859375,yfinance,,
@@ -1189,6 +1227,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,TLT,594000000.0,77.67995,thirdparty_stockanalysis,605643133.0,1.96
 2026-10-06,TLT,599500000.0,77.42227,thirdparty_stockanalysis,597157917.0,0.39
 2026-10-07,TLT,609600000.0,77.07607,thirdparty_stockanalysis,599840151.0,1.6
+2026-10-08,TLT,614500000.0,77.07607,thirdparty_stockanalysis,599840151.0,2.39
 2026-09-04,USFR,372380859.95554143,50.384,aum_implied,,
 2026-09-07,USFR,372306966.067389,50.394,aum_implied,,
 2026-09-08,USFR,372306966.067389,50.394,aum_implied,,
@@ -1213,6 +1252,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,USFR,394040000.0,50.391,thirdparty_stockanalysis,372329131.0,5.51
 2026-10-06,USFR,394040000.0,50.395,thirdparty_stockanalysis,392471494.0,0.4
 2026-10-07,USFR,412590000.0,50.413,thirdparty_stockanalysis,392331362.0,4.91
+2026-10-08,USFR,412540000.0,50.413,thirdparty_stockanalysis,392331362.0,4.9
 2026-09-10,USO,13096788.965745764,144.858,aum_implied,,
 2026-09-11,USO,12718205.10826574,149.17,aum_implied,,
 2026-09-12,USO,12002344.929681716,158.067,aum_implied,,
@@ -1233,6 +1273,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,USO,14820000.0,149.397,thirdparty_stockanalysis,12698881.0,14.31
 2026-10-06,USO,14820000.0,146.679,thirdparty_stockanalysis,11525727.0,22.23
 2026-10-07,USO,14820000.0,144.28,thirdparty_stockanalysis,11717370.0,20.94
+2026-10-08,USO,14820000.0,144.28,thirdparty_stockanalysis,11717370.0,20.94
 2026-09-04,VGT,1422034087.2135,119.11,aum_implied,,
 2026-09-07,VGT,1396820716.8728352,121.26,aum_implied,,
 2026-09-08,VGT,1407316286.194953,121.26,aum_implied,,
@@ -1257,6 +1298,7 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-10-03,VGT,1230000000.0,126.98,thirdparty_stockanalysis,1343921664.0,9.26
 2026-10-06,VGT,1230000000.0,128.32,thirdparty_stockanalysis,1379913033.0,12.19
 2026-10-07,VGT,1230000000.0,129.16,thirdparty_stockanalysis,1370938684.0,11.46
+2026-10-08,VGT,1230000000.0,129.16,thirdparty_stockanalysis,1370938684.0,11.46
 2026-06-29,XBI,69100000.0,158.315057,issuer_spdr,,
 2026-06-30,XBI,67850000.0,158.215003,issuer_spdr,,
 2026-07-01,XBI,67600000.0,156.499873,issuer_spdr,,
@@ -1326,7 +1368,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XBI,65675000.0,157.70852,issuer_spdr,,
 2026-10-01,XBI,65250000.0,154.512981,issuer_spdr,,
 2026-10-02,XBI,65375000.0,154.412054,issuer_spdr,,
-2026-10-05,XBI,66050000.0,156.115634,issuer_spdr,66345100.0,0.45
+2026-10-05,XBI,66050000.0,156.115634,issuer_spdr,,
+2026-10-06,XBI,66775000.0,150.887016,issuer_spdr,66345100.0,0.64
 2026-06-29,XHB,14050016.0,115.385411,issuer_spdr,,
 2026-06-30,XHB,14100016.0,115.606592,issuer_spdr,,
 2026-07-01,XHB,16850016.0,112.487186,issuer_spdr,,
@@ -1396,7 +1439,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XHB,14900016.0,95.997799,issuer_spdr,,
 2026-10-01,XHB,14850016.0,96.762904,issuer_spdr,,
 2026-10-02,XHB,15000016.0,96.706737,issuer_spdr,,
-2026-10-05,XHB,15700016.0,96.252787,issuer_spdr,14860543.0,5.35
+2026-10-05,XHB,15700016.0,96.252787,issuer_spdr,,
+2026-10-06,XHB,15750016.0,97.401552,issuer_spdr,14860543.0,5.65
 2026-06-29,XLB,161647450.0,50.663908,issuer_spdr,,
 2026-06-30,XLB,160547450.0,50.863537,issuer_spdr,,
 2026-07-01,XLB,160697450.0,51.00467,issuer_spdr,,
@@ -1468,7 +1512,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XLB,159747450.0,48.682207,issuer_spdr,,
 2026-10-01,XLB,159047450.0,48.550463,issuer_spdr,,
 2026-10-02,XLB,158047450.0,48.87751,issuer_spdr,,
-2026-10-05,XLB,157797450.0,49.489738,issuer_spdr,157140826.0,0.42
+2026-10-05,XLB,157797450.0,49.489738,issuer_spdr,,
+2026-10-06,XLB,157947450.0,49.734115,issuer_spdr,157140826.0,0.51
 2026-06-29,XLC,208200000.0,107.909844,issuer_spdr,,
 2026-06-30,XLC,207650000.0,107.21033,issuer_spdr,,
 2026-07-01,XLC,212200000.0,109.720754,issuer_spdr,,
@@ -1539,7 +1584,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XLC,203050000.0,110.950575,issuer_spdr,,
 2026-10-01,XLC,208100000.0,109.939616,issuer_spdr,,
 2026-10-02,XLC,207000000.0,110.281481,issuer_spdr,,
-2026-10-05,XLC,203900000.0,111.602011,issuer_spdr,201864770.0,1.0
+2026-10-05,XLC,203900000.0,111.602011,issuer_spdr,,
+2026-10-06,XLC,205200000.0,111.606066,issuer_spdr,201864770.0,1.63
 2026-06-29,XLE,672798400.0,53.571111,issuer_spdr,,
 2026-06-30,XLE,671748400.0,53.176667,issuer_spdr,,
 2026-07-01,XLE,671298400.0,52.816962,issuer_spdr,,
@@ -1611,7 +1657,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XLE,636748400.0,61.453088,issuer_spdr,,
 2026-10-01,XLE,634148400.0,62.670905,issuer_spdr,,
 2026-10-02,XLE,639398400.0,62.821379,issuer_spdr,,
-2026-10-05,XLE,639648400.0,63.429943,issuer_spdr,616903580.0,3.56
+2026-10-05,XLE,639648400.0,63.429943,issuer_spdr,,
+2026-10-06,XLE,642398400.0,63.721479,issuer_spdr,616903580.0,3.97
 2026-06-29,XLF,952595427.0,53.710503,issuer_spdr,,
 2026-06-30,XLF,957545427.0,53.630691,issuer_spdr,,
 2026-07-01,XLF,963795427.0,54.774505,issuer_spdr,,
@@ -1683,7 +1730,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XLF,955045427.0,53.367858,issuer_spdr,,
 2026-10-01,XLF,935645427.0,53.457483,issuer_spdr,,
 2026-10-02,XLF,935295427.0,53.463779,issuer_spdr,,
-2026-10-05,XLF,931695427.0,53.855025,issuer_spdr,946406075.0,1.58
+2026-10-05,XLF,931695427.0,53.855025,issuer_spdr,,
+2026-10-06,XLF,943945427.0,53.983531,issuer_spdr,946406075.0,0.26
 2026-06-29,XLI,180376000.0,182.810672,issuer_spdr,,
 2026-06-30,XLI,183276000.0,185.315534,issuer_spdr,,
 2026-07-01,XLI,182576000.0,183.356659,issuer_spdr,,
@@ -1755,7 +1803,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XLI,178676000.0,166.935957,issuer_spdr,,
 2026-10-01,XLI,178826000.0,168.607989,issuer_spdr,,
 2026-10-02,XLI,180026000.0,169.927826,issuer_spdr,,
-2026-10-05,XLI,181976000.0,170.032776,issuer_spdr,175421756.0,3.6
+2026-10-05,XLI,181976000.0,170.032776,issuer_spdr,,
+2026-10-06,XLI,183676000.0,171.562446,issuer_spdr,175421756.0,4.49
 2026-06-29,XLK,650511794.0,185.497299,issuer_spdr,,
 2026-06-30,XLK,650361794.0,190.528682,issuer_spdr,,
 2026-07-01,XLK,649311794.0,185.54904,issuer_spdr,,
@@ -1827,7 +1876,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XLK,650561794.0,195.673488,issuer_spdr,,
 2026-10-01,XLK,652011794.0,197.826778,issuer_spdr,,
 2026-10-02,XLK,651811794.0,199.818289,issuer_spdr,,
-2026-10-05,XLK,652461794.0,200.884691,issuer_spdr,633685383.0,2.88
+2026-10-05,XLK,652461794.0,200.884691,issuer_spdr,,
+2026-10-06,XLK,657311794.0,201.950782,issuer_spdr,633685383.0,3.59
 2026-06-29,XLP,165121809.0,84.38478,issuer_spdr,,
 2026-06-30,XLP,164221809.0,83.114986,issuer_spdr,,
 2026-07-01,XLP,163971809.0,83.298115,issuer_spdr,,
@@ -1899,7 +1949,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XLP,166871809.0,80.574226,issuer_spdr,,
 2026-10-01,XLP,163971809.0,80.324229,issuer_spdr,,
 2026-10-02,XLP,164571809.0,80.528829,issuer_spdr,,
-2026-10-05,XLP,164771809.0,81.01886,issuer_spdr,165956007.0,0.72
+2026-10-05,XLP,164771809.0,81.01886,issuer_spdr,,
+2026-10-06,XLP,164321809.0,81.768873,issuer_spdr,165956007.0,0.99
 2026-06-29,XLRE,183600000.0,44.928829,issuer_spdr,,
 2026-06-30,XLRE,184050000.0,44.022572,issuer_spdr,,
 2026-07-01,XLRE,185500000.0,44.16252,issuer_spdr,,
@@ -1970,7 +2021,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XLRE,187100000.0,40.900639,issuer_spdr,,
 2026-10-01,XLRE,186700000.0,40.678045,issuer_spdr,,
 2026-10-02,XLRE,185650000.0,40.792401,issuer_spdr,,
-2026-10-05,XLRE,185650000.0,40.64832,issuer_spdr,188261402.0,1.41
+2026-10-05,XLRE,185650000.0,40.64832,issuer_spdr,,
+2026-10-06,XLRE,186550000.0,41.103142,issuer_spdr,188261402.0,0.92
 2026-06-29,XLU,514998320.0,46.027254,issuer_spdr,,
 2026-06-30,XLU,509698320.0,45.343326,issuer_spdr,,
 2026-07-01,XLU,511748320.0,44.752358,issuer_spdr,,
@@ -2042,7 +2094,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XLU,540898320.0,39.429683,issuer_spdr,,
 2026-10-01,XLU,557048320.0,39.671619,issuer_spdr,,
 2026-10-02,XLU,566598320.0,39.819308,issuer_spdr,,
-2026-10-05,XLU,568048320.0,39.955185,issuer_spdr,533784225.0,6.03
+2026-10-05,XLU,568048320.0,39.955185,issuer_spdr,,
+2026-10-06,XLU,565648320.0,41.155921,issuer_spdr,533784225.0,5.63
 2026-06-29,XLV,254665324.0,160.810602,issuer_spdr,,
 2026-06-30,XLV,255765324.0,158.735142,issuer_spdr,,
 2026-07-01,XLV,256415324.0,159.564652,issuer_spdr,,
@@ -2114,7 +2167,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XLV,257815324.0,168.311132,issuer_spdr,,
 2026-10-01,XLV,257215324.0,166.125598,issuer_spdr,,
 2026-10-02,XLV,257765324.0,166.093797,issuer_spdr,,
-2026-10-05,XLV,258015324.0,167.342105,issuer_spdr,259308223.0,0.5
+2026-10-05,XLV,258015324.0,167.342105,issuer_spdr,,
+2026-10-06,XLV,258015324.0,167.080441,issuer_spdr,259308223.0,0.5
 2026-06-29,XLY,190806504.0,117.122437,issuer_spdr,,
 2026-06-30,XLY,192606504.0,117.303596,issuer_spdr,,
 2026-07-01,XLY,193106504.0,118.045424,issuer_spdr,,
@@ -2186,7 +2240,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XLY,195456504.0,108.837758,issuer_spdr,,
 2026-10-01,XLY,194706504.0,108.810011,issuer_spdr,,
 2026-10-02,XLY,194556504.0,110.013645,issuer_spdr,,
-2026-10-05,XLY,195006504.0,110.380174,issuer_spdr,192725261.0,1.17
+2026-10-05,XLY,195006504.0,110.380174,issuer_spdr,,
+2026-10-06,XLY,195706504.0,111.734823,issuer_spdr,192725261.0,1.52
 2026-06-29,XOP,19300000.0,155.299873,issuer_spdr,,
 2026-06-30,XOP,18900000.0,154.206699,issuer_spdr,,
 2026-07-01,XOP,19400000.0,153.752832,issuer_spdr,,
@@ -2258,7 +2313,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XOP,20200000.0,179.175955,issuer_spdr,,
 2026-10-01,XOP,20700000.0,184.300846,issuer_spdr,,
 2026-10-02,XOP,21750000.0,184.89972,issuer_spdr,,
-2026-10-05,XOP,21950000.0,187.338503,issuer_spdr,19319864.0,11.98
+2026-10-05,XOP,21950000.0,187.338503,issuer_spdr,,
+2026-10-06,XOP,22050000.0,188.393354,issuer_spdr,19319864.0,12.38
 2026-06-29,XRT,3850226.0,87.981873,issuer_spdr,,
 2026-06-30,XRT,4350226.0,87.667867,issuer_spdr,,
 2026-07-01,XRT,4600226.0,87.784534,issuer_spdr,,
@@ -2328,7 +2384,8 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XRT,5300226.0,82.114756,issuer_spdr,,
 2026-10-01,XRT,4700226.0,82.629894,issuer_spdr,,
 2026-10-02,XRT,4300226.0,82.623633,issuer_spdr,,
-2026-10-05,XRT,4500226.0,82.853471,issuer_spdr,5252970.0,16.73
+2026-10-05,XRT,4500226.0,82.853471,issuer_spdr,,
+2026-10-06,XRT,4850226.0,83.00099,issuer_spdr,5252970.0,8.3
 2026-06-29,XTN,3160000.0,115.7896,issuer_spdr,,
 2026-06-30,XTN,3180000.0,115.517069,issuer_spdr,,
 2026-07-01,XTN,3250000.0,116.046734,issuer_spdr,,
@@ -2398,4 +2455,5 @@ date,ticker,shares_outstanding,price,shares_source,aum_implied_shares,cross_chec
 2026-09-30,XTN,3020000.0,98.018368,issuer_spdr,,
 2026-10-01,XTN,2990000.0,99.187882,issuer_spdr,,
 2026-10-02,XTN,2990000.0,100.972723,issuer_spdr,,
-2026-10-05,XTN,2990000.0,100.445316,issuer_spdr,2947031.0,1.44
+2026-10-05,XTN,2990000.0,100.445316,issuer_spdr,,
+2026-10-06,XTN,2990000.0,100.255654,issuer_spdr,2947031.0,1.44
