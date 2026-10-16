@@ -27,7 +27,10 @@ THE FIX — three backends behind one interface, auto-selected
   reported, never silent.
 
 CONFIGURATION (Streamlit secrets, or environment variables)
-  GITHUB_TOKEN   fine-grained PAT, "Contents: read and write" on ONE repo
+  GH_APP_ID, GH_APP_PRIVATE_KEY (+ optional GH_APP_INSTALLATION_ID)
+                 preferred: GitHub App with "Contents: read and write"; never
+                 expires (see GITHUB_APP_SETUP.md). Takes priority when set.
+  GITHUB_TOKEN   fallback: fine-grained PAT, "Contents: read and write"
   GITHUB_REPO    "username/all-weather-dashboard"
   GITHUB_BRANCH  default "main"
   DATA_DIR       default "data"
@@ -66,7 +69,7 @@ GITHUB_API = "https://api.github.com"
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-def _cfg(key: str, default: str = "") -> str:
+def _raw_cfg(key: str, default: str = "") -> str:
     """Streamlit secrets first, then environment. Never raises."""
     if _HAS_ST:
         try:
@@ -77,14 +80,145 @@ def _cfg(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
+def _cfg(key: str, default: str = "") -> str:
+    """Same as _raw_cfg, except GITHUB_TOKEN resolves through github_token().
+
+    Every caller in this codebase (here, log_viewer, swing_tab, publish
+    scripts) asks for _cfg("GITHUB_TOKEN"). Routing that one key through the
+    GitHub App means none of them had to change.
+    """
+    if key == "GITHUB_TOKEN":
+        return github_token() or default
+    return _raw_cfg(key, default)
+
+
+# ── GitHub App auth (v2 — Oct 2026) ───────────────────────────────────────────
+# A fine-grained PAT expires (max one year) and every app silently drops to
+# ephemeral storage the day it does. A GitHub App's private key never expires;
+# it is used to mint a one-hour installation token on demand, cached here and
+# refreshed five minutes before expiry.
+#
+# Secrets (Streamlit secrets or environment):
+#   GH_APP_ID               numeric App ID from the app's settings page
+#   GH_APP_PRIVATE_KEY      full contents of the downloaded .pem file
+#   GH_APP_INSTALLATION_ID  optional; discovered from GITHUB_REPO when unset
+#
+# When the App secrets are absent, or minting fails, GITHUB_TOKEN (the old PAT)
+# is used exactly as before. Nothing breaks if the App is half set up.
+
+import threading
+import time as _time
+
+_APP_LOCK = threading.Lock()
+_APP_CACHE: dict = {"token": "", "expires": 0.0, "installation": "",
+                    "retry_after": 0.0}
+_APP_STATE: dict = {"source": "", "error": ""}
+_APP_REFRESH_S = 300          # refresh when under 5 minutes of life remains
+_APP_RETRY_S = 60             # after a failed mint, wait before trying again
+
+
+def _app_configured() -> bool:
+    return bool(_raw_cfg("GH_APP_ID").strip() and _raw_cfg("GH_APP_PRIVATE_KEY").strip())
+
+
+def _app_private_key() -> str:
+    key = _raw_cfg("GH_APP_PRIVATE_KEY").strip()
+    if "\\n" in key and "\n" not in key:          # pasted as one line with literal \n
+        key = key.replace("\\n", "\n")
+    return key
+
+
+def _app_jwt() -> str:
+    import jwt                                      # PyJWT; needs `cryptography`
+    now = int(_time.time())
+    payload = {"iat": now - 60, "exp": now + 540,  # GitHub allows at most 10 min
+               "iss": _raw_cfg("GH_APP_ID").strip()}
+    tok = jwt.encode(payload, _app_private_key(), algorithm="RS256")
+    return tok.decode() if isinstance(tok, bytes) else tok
+
+
+def _app_installation_id(app_jwt: str) -> str:
+    inst = _raw_cfg("GH_APP_INSTALLATION_ID").strip()
+    if inst:
+        return inst
+    if _APP_CACHE["installation"]:
+        return _APP_CACHE["installation"]
+    h = _gh_headers(app_jwt)
+    repo = _raw_cfg("GITHUB_REPO").strip()
+    if repo:
+        r = requests.get(f"{GITHUB_API}/repos/{repo}/installation", headers=h, timeout=20)
+        if r.status_code == 200:
+            return str(r.json()["id"])
+    r = requests.get(f"{GITHUB_API}/app/installations", headers=h, timeout=20)
+    r.raise_for_status()
+    insts = r.json()
+    if len(insts) != 1:
+        raise RuntimeError(f"app has {len(insts)} installations; set GH_APP_INSTALLATION_ID")
+    return str(insts[0]["id"])
+
+
+def _mint_app_token() -> tuple[str, float]:
+    app_jwt = _app_jwt()
+    inst = _app_installation_id(app_jwt)
+    r = requests.post(f"{GITHUB_API}/app/installations/{inst}/access_tokens",
+                      headers=_gh_headers(app_jwt), timeout=20)
+    r.raise_for_status()
+    j = r.json()
+    exp = datetime.strptime(j["expires_at"], "%Y-%m-%dT%H:%M:%SZ")
+    exp_epoch = (exp - datetime(1970, 1, 1)).total_seconds()
+    _APP_CACHE["installation"] = inst
+    return j["token"], exp_epoch
+
+
+def github_token() -> str:
+    """Token for the GitHub contents API: App installation token when the App
+    is configured and minting works, otherwise the static GITHUB_TOKEN."""
+    if _app_configured() and _HAS_REQ:
+        with _APP_LOCK:
+            now = _time.time()
+            if _APP_CACHE["token"] and _APP_CACHE["expires"] - now > _APP_REFRESH_S:
+                _APP_STATE.update(source="app", error="")
+                return _APP_CACHE["token"]
+            if now >= _APP_CACHE["retry_after"]:
+                try:
+                    tok, exp = _mint_app_token()
+                    _APP_CACHE.update(token=tok, expires=exp, retry_after=0.0)
+                    _APP_STATE.update(source="app", error="")
+                    return tok
+                except Exception as e:
+                    _APP_CACHE["retry_after"] = now + _APP_RETRY_S
+                    _APP_STATE["error"] = f"{type(e).__name__}: {e}"
+                    print(f"[storage] GitHub App token mint failed: {_APP_STATE['error']}")
+            if _APP_CACHE["token"] and _APP_CACHE["expires"] > now:
+                _APP_STATE["source"] = "app"           # stale-but-valid beats nothing
+                return _APP_CACHE["token"]
+    pat = _raw_cfg("GITHUB_TOKEN")
+    _APP_STATE["source"] = "pat" if pat else ""
+    return pat
+
+
+def auth_status() -> dict:
+    """Which credential is in use, for the UI and the publish logs."""
+    tok = github_token()
+    src = _APP_STATE["source"]
+    label = {"app": "GitHub App (auto-renewing)",
+             "pat": "personal access token (expires)"}.get(src, "none")
+    if _app_configured() and src != "app":
+        label += " — GitHub App configured but failed: " + (_APP_STATE["error"] or "unknown")
+    return {"source": src or "none", "label": label, "has_token": bool(tok),
+            "app_configured": _app_configured(), "error": _APP_STATE["error"]}
+
+
 def backend_status() -> dict:
     """What storage is actually active, and why. Surfaced in the UI so the
     durability situation is never a surprise."""
     token, repo = _cfg("GITHUB_TOKEN"), _cfg("GITHUB_REPO")
     if token and repo and _HAS_REQ:
+        auth = auth_status()
         return {"backend": "github", "durable": True, "target": repo,
+                "auth": auth["source"],
                 "detail": f"Commits to {repo}@{_cfg('GITHUB_BRANCH', 'main')} — "
-                          f"durable and versioned."}
+                          f"durable and versioned. Auth: {auth['label']}."}
     if token and not repo:
         return {"backend": "local", "durable": False, "target": _cfg("DATA_DIR", "data"),
                 "detail": "GITHUB_TOKEN set but GITHUB_REPO missing — falling back to "
@@ -260,7 +394,7 @@ def selftest() -> dict:
     return {"status": backend_status(), "write_result": w, "roundtrip_ok": ok,
             "message": ("Storage verified — data will survive redeploys."
                         if ok and w.get("durable") else
-                        "Round-trip OK but NOT durable — set GITHUB_TOKEN/GITHUB_REPO."
+                        "Round-trip OK but NOT durable — set the GitHub App secrets (or GITHUB_TOKEN) and GITHUB_REPO."
                         if ok else
                         "FAILED — check token scope (needs Contents: read and write) "
                         "and that GITHUB_REPO is 'owner/repo'.")}

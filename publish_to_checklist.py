@@ -109,9 +109,14 @@ def main() -> int:
 
     print(f"[publish] result: ok={result['ok']} durable={result['durable']} "
           f"counts={result['counts']}")
+    try:
+        import storage_backend as _sb
+        print(f"[publish] auth: {_sb.auth_status()['label']}")
+    except Exception as _e:
+        print(f"[publish] auth: unknown ({_e})")
 
     if not result["ok"]:
-        print("[publish] FAILED TO WRITE — check GITHUB_TOKEN/GITHUB_REPO "
+        print("[publish] FAILED TO WRITE — check GH_APP_* or GITHUB_TOKEN, and GITHUB_REPO "
               "(env vars in the Action, or Streamlit secrets when run from the "
               "app). See storage_backend.backend_status().", file=sys.stderr)
         return 1

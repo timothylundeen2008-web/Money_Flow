@@ -8,3 +8,5 @@ lxml>=4.9.0
 yfinance>=0.2.40
 openpyxl>=3.1.0
 curl_cffi>=0.7
+PyJWT>=2.8          # GitHub App auth (storage_backend.github_token)
+cryptography>=42.0  # RS256 signing for PyJWT
