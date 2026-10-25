@@ -97,8 +97,11 @@ def publish_summary(sector_df: pd.DataFrame | None = None,
         payload["constituents"] = {}
 
     if flow_divergence is not None and not flow_divergence.empty:
+        # v2.1 (Oct 2026): "measurable" = the Flow Map's own test (trustworthy
+        # series AND >= 80% of the 20-session window measured). Consumers that
+        # score or act on a divergence must require it.
         keep = [c for c in ("ticker", "price_chg_pct", "net_flow_pct_aum",
-                            "verdict", "divergence") if c in flow_divergence.columns]
+                            "verdict", "divergence", "measurable") if c in flow_divergence.columns]
         payload["flow_divergences"] = flow_divergence[keep].to_dict("records")
 
     if cot_table is not None and not cot_table.empty:

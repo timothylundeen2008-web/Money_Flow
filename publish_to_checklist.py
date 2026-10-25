@@ -85,6 +85,20 @@ def main() -> int:
     flow_div = _safe("flow_divergence", flow_vs_price_divergence)
     print(f"[publish] flow_divergence: {0 if flow_div is None else len(flow_div)} rows")
 
+    # v2.1: tag each divergence with the Flow Map's measurability test, so a
+    # divergence built from 13 of 20 sessions is never scored or acted on as
+    # if it were complete. Missing tag downstream = not measurable.
+    def _measurable():
+        from etf_flow_tracker import compute_flows, ticker_quality
+        import flow_map
+        funds = flow_map.fund_flows(compute_flows(), 20, ticker_quality)
+        return set(funds.loc[funds["measurable"].astype(bool), "ticker"]) if not funds.empty else set()
+    meas = _safe("flow measurability", _measurable)
+    if flow_div is not None and not flow_div.empty:
+        flow_div = flow_div.copy()
+        flow_div["measurable"] = flow_div["ticker"].isin(meas or set())
+        print(f"[publish] flow_divergence measurable: {int(flow_div['measurable'].sum())} of {len(flow_div)}")
+
     schema = _safe("COT schema check", verify_schema) or {}
     schema_ok = bool(schema) and all(v.get("ok") for v in schema.values())
     if schema and not schema_ok:
