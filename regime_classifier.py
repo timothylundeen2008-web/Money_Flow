@@ -1,5 +1,5 @@
 """
-regime_classifier.py  (v3 — July 2026 band/guard patch; v8 Oct 2026: growth_scare needs price confirmation)
+regime_classifier.py  (v3 — July 2026 band/guard patch; v8 Oct 2026: growth_scare needs price confirmation; v9 Oct 2026: data-failure guard)
 =======================================================
 
 v3 CHANGELOG (vs v2):
@@ -1614,12 +1614,96 @@ def kmlm_signal(sig: SignalSet) -> dict:
 # --------------------------------------------------------------------------- #
 #  One-call convenience for either app
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+#  v9 — DATA-FAILURE GUARD (Oct 2026)
+# --------------------------------------------------------------------------- #
+# On 2026-10-21 every FRED series came back empty. classify_regime() received
+# a SignalSet of Nones, matched no branch, and returned `neutral` -- the label
+# that means "hold BASE weights" (TLT 10%, VGT 20%). The daily log, the model
+# book and the brief all recorded a regime change that was really an outage.
+# The two-close rule stopped execution only because the outage lasted a day.
+#
+# A missing input is not evidence. When any CORE input is missing, the
+# assessment HOLDS the last confirmed regime (passed in, or read from the
+# local daily log / Markets bridge file) and flags the result
+# `data_failure=True` so every consumer can say so. With no prior on record it
+# returns `neutral`, still flagged, and the drivers say not to act on it.
+CORE_INPUTS = ("short_real_rate", "long_real_mom_3m", "hy_oas")
+PRIOR_SOURCES = ("logs/daily_log.csv", "data/markets_summary.json")
+
+
+def input_health(sig: "SignalSet") -> dict:
+    """Which Level-1 inputs the classifier is missing. `failed` means the
+    regime cannot be classified honestly from this SignalSet."""
+    missing = [k for k in CORE_INPUTS if getattr(sig, k, None) is None]
+    optional = [k for k in ("long_real_yield", "spread_2s10s", "spread_2s10s_mom_3m",
+                            "dxy_20d_change_pct", "hy_oas_mom_2w", "cpi_yoy")
+                if getattr(sig, k, None) is None]
+    return {"failed": bool(missing), "missing_core": missing, "missing_optional": optional,
+            "detail": ("all core inputs present" if not missing else
+                       f"missing core input(s): {', '.join(missing)}")}
+
+
+def prior_regime_from_disk(paths: tuple = PRIOR_SOURCES) -> Optional[str]:
+    """Last confirmed regime key on record, or None. Reads the local daily log
+    (newest row whose regime is a valid key and not itself a held failure
+    with no prior), then the Markets bridge file. Never raises."""
+    import json as _json
+    import os as _os
+    env = _os.environ.get("REGIME_PRIOR_SOURCE")
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    # cwd-relative first (Actions run from the app folder), then relative to
+    # this module (Streamlit Cloud runs from the repo root, so the Markets app
+    # in Dashboard/Repression_Dashboard_Claude/ finds its own logs here).
+    cands = ((env,) if env else ()) + tuple(paths) + tuple(
+        _os.path.join(here, q) for q in paths if not _os.path.isabs(q))
+    for p in dict.fromkeys(cands):
+        try:
+            if not p or not _os.path.exists(p):
+                continue
+            if p.endswith(".csv"):
+                df = pd.read_csv(p)
+                if "regime" not in df.columns or df.empty:
+                    continue
+                if "et_date" in df.columns:
+                    df = df.sort_values("et_date")
+                keys = [k for k in df["regime"].astype(str).tolist() if k in REGIMES]
+                if keys:
+                    return keys[-1]
+            else:
+                with open(p) as fh:
+                    reg = (_json.load(fh) or {}).get("regime") or {}
+                if reg.get("key") in REGIMES and not reg.get("data_failure"):
+                    return reg["key"]
+        except Exception:
+            continue
+    return None
+
+
+def held_regime(health: dict, prior: Optional[str]) -> dict:
+    """The regime dict returned when classification is impossible."""
+    key = prior if prior in REGIMES else "neutral"
+    drivers = [f"⚠ DATA FAILURE — {health['detail']}. The regime was NOT re-classified on "
+               f"empty data."]
+    if prior in REGIMES:
+        drivers.append(f"Holding the last confirmed regime `{prior}` until the inputs return. "
+                       f"Nothing in this read is new information about the market.")
+    else:
+        drivers.append("No prior regime on record — showing `neutral` (base weights) only as a "
+                       "placeholder. Do NOT act on it.")
+    r = _regime(key, drivers)
+    r.update(data_failure=True, held_from=prior if prior in REGIMES else None,
+             missing_inputs=list(health.get("missing_core", [])))
+    return r
+
+
 def full_assessment(fred_api_key: str = "",
                     fed_bs_expanding: Optional[bool] = None,
                     deficit_gt_5pct_gdp: Optional[bool] = None,
                     cape: Optional[float] = None,
                     top20_concentration_pct: Optional[float] = None,
                     growth: Optional[dict] = None,
+                    prior_regime: Optional[str] = None,
                     **kw) -> dict:
     """
     v3 FIX 10. Two changes, both of which were silently degrading the output:
@@ -1639,12 +1723,19 @@ def full_assessment(fred_api_key: str = "",
     """
     fetch_prices = kw.get("fetch_prices")
     sig = compute_signals(fred_api_key, **kw)
-    regime = classify_regime(sig, fetch_prices=fetch_prices, cape=cape,
-                             top20_concentration_pct=top20_concentration_pct,
-                             growth=growth)
+    health = input_health(sig)
+    if health["failed"]:
+        # v9: never classify on empty inputs -- hold the last confirmed regime.
+        regime = held_regime(health, prior_regime or prior_regime_from_disk())
+    else:
+        regime = classify_regime(sig, fetch_prices=fetch_prices, cape=cape,
+                                 top20_concentration_pct=top20_concentration_pct,
+                                 growth=growth)
+        regime["data_failure"] = False
     _tw = target_weights(regime["key"], fetch_prices=fetch_prices, signals=sig, detail=True)
     return {
         "signals": sig,
+        "data_health": health,
         "regime": regime,
         "fed": fed_reaction_flag(sig),
         "targets": _tw[0],
@@ -1960,6 +2051,31 @@ def selftest() -> dict:
         fails.append("negative short real + positive long real + hot CPI must read SOFT repression")
     if not _f(short_real_rate=-1.5, long_real_yield=0.0, cpi_yoy=4.0).startswith("HARD"):
         fails.append("suppressed long real + hot CPI must read HARD repression")
+    # v9 data-failure guard
+    _empty = SignalSet()
+    _h = input_health(_empty)
+    if not _h["failed"] or set(_h["missing_core"]) != set(CORE_INPUTS):
+        fails.append(f"an empty SignalSet must fail input_health: {_h}")
+    _held = held_regime(_h, "restrictive_tightening")
+    if _held["key"] != "restrictive_tightening" or not _held.get("data_failure"):
+        fails.append(f"a data failure must HOLD the prior regime, flagged: {_held}")
+    _none = held_regime(_h, None)
+    if _none["key"] != "neutral" or not _none.get("data_failure") or _none.get("held_from") is not None:
+        fails.append("with no prior, a data failure returns flagged neutral")
+    if held_regime(_h, "not_a_regime")["key"] != "neutral":
+        fails.append("an invalid prior key must not be held")
+    _ok = input_health(SignalSet(short_real_rate=0.1, long_real_mom_3m=0.2, hy_oas=3.0))
+    if _ok["failed"]:
+        fails.append("all core inputs present must not fail")
+    import os as _os, tempfile as _tf
+    with _tf.TemporaryDirectory() as _d:
+        _p = _os.path.join(_d, "daily_log.csv")
+        pd.DataFrame({"et_date": ["2026-10-19", "2026-10-20"],
+                      "regime": ["goldilocks", "transition_ambiguous"]}).to_csv(_p, index=False)
+        if prior_regime_from_disk((_p,)) != "transition_ambiguous":
+            fails.append("prior regime must come from the newest daily-log row")
+        if prior_regime_from_disk((_os.path.join(_d, "missing.csv"),)) is not None:
+            fails.append("a missing prior source must return None, not raise")
     return {"ok": not fails, "failures": fails, "targets_restrictive_tightening": tw}
 
 

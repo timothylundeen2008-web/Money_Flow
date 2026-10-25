@@ -1,5 +1,5 @@
 """
-fred_client.py  (v1 — July 2026)
+fred_client.py  (v1 — July 2026; v1.1 Oct 2026: retries, outage breaker, last-good memory)
 ──────────────────────────────────────────────────────────────────────────────
 FRED access that works WITH or WITHOUT an API key.
 
@@ -44,6 +44,7 @@ ON HARDCODING THE KEY
 from __future__ import annotations
 
 from io import StringIO
+from typing import Optional
 
 import pandas as pd
 
@@ -62,6 +63,63 @@ except Exception:
         return fn
 
 import os
+
+import time as _time
+
+# ── v1.1 resilience (Oct 2026) ─────────────────────────────────────────────
+# On 2026-10-21 every FRED series came back empty in the nightly run and the
+# regime classifier fell through to `neutral`. One transient failure used to
+# mean one empty series: there was no retry. Now:
+#   * each HTTP call retries on connection errors, timeouts, 429 and 5xx
+#     (RETRY_WAITS seconds between attempts); other 4xx fail at once
+#   * after OUTAGE_AFTER consecutive series fail on BOTH endpoints, FRED is
+#     treated as down for OUTAGE_COOLDOWN seconds and calls return empty
+#     immediately, so a full outage costs seconds, not minutes per series
+#   * the last good pull of each series is kept in memory and returned
+#     (and reported as stale via last_good_age()) when a refetch fails
+# The classifier's own data-failure guard (regime_classifier v9) handles
+# whatever still comes back empty.
+RETRY_WAITS = (1.5, 4.0)
+OUTAGE_AFTER = 4
+OUTAGE_COOLDOWN = 300
+_state = {"consecutive_failures": 0, "down_until": 0.0, "last_error": ""}
+_last_good: dict = {}       # (series_id, start) -> (fetched_epoch, Series)
+
+
+def _http_get(url: str, params: dict, timeout: int) -> "requests.Response":
+    """GET with bounded retries on transient failures. Raises on final failure."""
+    last = None
+    for i in range(len(RETRY_WAITS) + 1):
+        try:
+            r = requests.get(url, timeout=timeout, headers=_HEADERS, params=params)
+            if r.status_code == 429 or r.status_code >= 500:
+                last = RuntimeError(f"HTTP {r.status_code}")
+            else:
+                r.raise_for_status()          # other 4xx: not transient, no retry
+                return r
+        except requests.exceptions.HTTPError:
+            raise
+        except Exception as e:                # connection error, timeout, DNS
+            last = e
+        if i < len(RETRY_WAITS):
+            _time.sleep(RETRY_WAITS[i])
+    raise last if last else RuntimeError("request failed")
+
+
+def outage_status() -> dict:
+    """Is FRED currently treated as down? For the UI and the brief's data health."""
+    now = _time.time()
+    return {"down": now < _state["down_until"],
+            "seconds_left": max(0, int(_state["down_until"] - now)),
+            "consecutive_failures": _state["consecutive_failures"],
+            "last_error": _state["last_error"]}
+
+
+def last_good_age(series_id: str, start: str = "2015-01-01") -> Optional[float]:
+    """Seconds since the last successful pull of this series in this process."""
+    v = _last_good.get((series_id, start))
+    return None if v is None else _time.time() - v[0]
+
 
 FRED_API = "https://api.stlouisfed.org/fred/series/observations"
 FRED_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv"
@@ -90,10 +148,8 @@ def get_api_key() -> str:
 
 def _via_api(series_id: str, api_key: str, start: str) -> pd.Series:
     try:
-        r = requests.get(FRED_API, timeout=20, headers=_HEADERS, params={
-            "series_id": series_id, "api_key": api_key,
-            "file_type": "json", "observation_start": start})
-        r.raise_for_status()
+        r = _http_get(FRED_API, {"series_id": series_id, "api_key": api_key,
+                                 "file_type": "json", "observation_start": start}, 20)
         obs = r.json().get("observations", [])
         idx, vals = [], []
         for o in obs:
@@ -112,9 +168,7 @@ def _via_api(series_id: str, api_key: str, start: str) -> pd.Series:
 def _via_csv(series_id: str, start: str) -> pd.Series:
     """Keyless. Same data, CSV transport."""
     try:
-        r = requests.get(FRED_CSV, timeout=25, headers=_HEADERS,
-                         params={"id": series_id, "cosd": start})
-        r.raise_for_status()
+        r = _http_get(FRED_CSV, {"id": series_id, "cosd": start}, 25)
         df = pd.read_csv(StringIO(r.text))
         if df.shape[1] < 2:
             return pd.Series(dtype=float)
@@ -143,14 +197,36 @@ def _fetch_fred_uncached(series_id: str, api_key: str = "",
     """
     if requests is None:
         return pd.Series(dtype=float)
+    if _time.time() < _state["down_until"]:
+        return _fallback_last_good(series_id, start)
 
+    s = pd.Series(dtype=float)
     if api_key:
         s = _via_api(series_id, api_key, start)
-        if not s.empty:
-            return s
-        print(f"[fred] API returned nothing for {series_id}; trying keyless CSV")
+        if s.empty:
+            print(f"[fred] API returned nothing for {series_id}; trying keyless CSV")
+    if s.empty:
+        s = _via_csv(series_id, start)
 
-    return _via_csv(series_id, start)
+    if not s.empty:
+        _state["consecutive_failures"] = 0
+        _last_good[(series_id, start)] = (_time.time(), s)
+        return s
+    _state["consecutive_failures"] += 1
+    _state["last_error"] = f"{series_id}: both endpoints empty"
+    if _state["consecutive_failures"] >= OUTAGE_AFTER:
+        _state["down_until"] = _time.time() + OUTAGE_COOLDOWN
+        print(f"[fred] {OUTAGE_AFTER} series in a row failed on both endpoints — treating FRED "
+              f"as DOWN for {OUTAGE_COOLDOWN}s")
+    return _fallback_last_good(series_id, start)
+
+
+def _fallback_last_good(series_id: str, start: str) -> pd.Series:
+    v = _last_good.get((series_id, start))
+    if v is not None:
+        print(f"[fred] serving last good {series_id} ({int(_time.time() - v[0])}s old)")
+        return v[1]
+    return pd.Series(dtype=float)
 
 
 # Cache only SUCCESSFUL fetches. A transient failure returns empty but is not
@@ -179,7 +255,10 @@ def fetch_fred(series_id: str, api_key: str = "",
             return s
     except Exception as e:
         print(f"[fred] cached path error for {series_id}: {e}")
-    # Cache returned/raised empty — retry uncached so a recovered network works
+    # Cache returned/raised empty — retry uncached so a recovered network works,
+    # unless FRED is already marked down (then don't spend another round trip).
+    if _time.time() < _state["down_until"]:
+        return _fallback_last_good(series_id, start)
     return _fetch_fred_uncached(series_id, api_key, start)
 
 
@@ -203,3 +282,79 @@ def status(api_key: str = "") -> dict:
             "FRED unreachable on BOTH endpoints. Check network egress — every "
             "Level-1 signal depends on this."),
     }
+
+
+def selftest() -> dict:
+    """Retry, breaker and last-good behaviour with a fake transport (no network)."""
+    import types
+    f = []
+    global requests
+    real = requests
+    calls = {"n": 0}
+
+    class _Resp:
+        def __init__(self, code, text=""):
+            self.status_code, self.text = code, text
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise real.exceptions.HTTPError(f"HTTP {self.status_code}")
+        def json(self):
+            return {"observations": [{"date": "2026-10-20", "value": "1.0"}]}
+
+    def fake(seq):
+        it = iter(seq)
+        def get(url, **k):
+            calls["n"] += 1
+            x = next(it)
+            if isinstance(x, Exception):
+                raise x
+            return _Resp(x, "DATE,X\n2026-10-20,1.0\n")
+        return types.SimpleNamespace(get=get, exceptions=real.exceptions)
+
+    waits, _sleep = RETRY_WAITS, _time.sleep
+    try:
+        globals()["RETRY_WAITS"] = (0.0, 0.0)
+        _time.sleep = lambda s: None
+        _state.update(consecutive_failures=0, down_until=0.0)
+        # transient 503 then success -> one series, no failure counted
+        requests = fake([503, 200])
+        s = _fetch_fred_uncached("TEST1", "", "2015-01-01")
+        if s.empty or calls["n"] != 2:
+            f.append(f"must retry a 503 and succeed: rows={len(s)} calls={calls['n']}")
+        # 400 is not retried
+        calls["n"] = 0
+        requests = fake([400])
+        try:
+            _http_get("u", {}, 1); f.append("400 must raise")
+        except Exception:
+            pass
+        if calls["n"] != 1:
+            f.append(f"400 must not be retried (calls={calls['n']})")
+        # last-good served when a refetch fails
+        requests = fake([real.exceptions.ConnectionError("x")] * 3)
+        lg = _fetch_fred_uncached("TEST1", "", "2015-01-01")
+        if lg.empty:
+            f.append("a failed refetch must serve the last good series")
+        # breaker opens after OUTAGE_AFTER consecutive total failures
+        _state.update(consecutive_failures=0, down_until=0.0)
+        requests = fake([real.exceptions.ConnectionError("x")] * 3 * OUTAGE_AFTER)
+        for i in range(OUTAGE_AFTER):
+            _fetch_fred_uncached(f"NEW{i}", "", "2015-01-01")
+        if not outage_status()["down"]:
+            f.append("breaker must open after consecutive total failures")
+        calls["n"] = 0
+        _fetch_fred_uncached("NEWX", "", "2015-01-01")
+        if calls["n"] != 0:
+            f.append("while down, calls must return without touching the network")
+    finally:
+        requests = real
+        globals()["RETRY_WAITS"] = waits
+        _time.sleep = _sleep
+        _state.update(consecutive_failures=0, down_until=0.0, last_error="")
+        _last_good.clear()
+    return {"ok": not f, "failures": f}
+
+
+if __name__ == "__main__":
+    import json as _json
+    print(_json.dumps(selftest(), indent=2))
