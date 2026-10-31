@@ -1,6 +1,13 @@
 """
-etf_flow_tracker.py  (v2 — September 2026)
+etf_flow_tracker.py  (v2.1 — October 2026)
 ──────────────────────────────────────────────────────────────────────────────
+v2.1 (2026-10-31, fix_status N19): ticker_quality() no longer trusts a
+  third-party relay series just because its share count changed at some point.
+  If the count has not changed for more than MAX_RELAY_FLAT_SESSIONS (4) it is
+  treated as frozen: SGOV sat at 1.16B for 5+ sessions while +4.30% of AUM was
+  reported as inflow, and EEM/EFA had been flat for 16-19 sessions. Issuer
+  feeds are unchanged. Every result now carries sessions_since_change.
+
 ⚠ HONEST STATUS, READ BEFORE TRUSTING ANY OUTPUT ⚠
 
 The sources below were implemented WITHOUT live network access to their
@@ -743,6 +750,14 @@ MIN_AUM_UPDATE_RATE = 0.40      # of the last 20 sessions on the current source
 PRICE_MIRROR_CORR = -0.80
 MIN_QUALITY_SESSIONS = 5        # below this, too little history to judge
 MAX_SESSIONS_SINCE_UPDATE = 3   # AUM unchanged longer than this = feed frozen
+# v2.1 (N19): a third-party relay count unchanged for longer than this is
+# treated as frozen. Set from the store on 2026-10-31: across 21 issuer-fed
+# series (SPDR, Schwab) the longest run without a share change in 60 sessions
+# was 4 (XTN, a small fund), so a relay count flat for 5+ sessions is not
+# behaving like real creations/redemptions. Issuer feeds are exempt: a flat
+# issuer count is a genuine no-flow day.
+RELAY_PREFIX = "thirdparty"
+MAX_RELAY_FLAT_SESSIONS = 4
 
 
 def _stale_aum_rows(g: pd.DataFrame) -> pd.Series:
@@ -785,12 +800,26 @@ def ticker_quality(g: pd.DataFrame, window: int = 20) -> dict:
         out["reason"] = f"fewer than 2 sessions on current source ({src})"
         return out
     out["moving"] = bool(g["shares_outstanding"].nunique(dropna=True) > 1)
+    changed = g["shares_outstanding"].diff().iloc[1:].fillna(0).ne(0)
+    out["sessions_since_change"] = int((~changed[::-1]).cumprod().sum()) if len(changed) else 0
     if src == "yfinance":
         out["reason"] = "yfinance sharesOutstanding is annual-granularity — never capital data"
         return out
     if src != "aum_implied":
-        out["trustworthy"] = out["moving"]
-        out["reason"] = f"issuer source ({src})" if out["moving"] else f"{src}: shares never changed"
+        if not out["moving"]:
+            out["reason"] = f"{src}: shares never changed"
+            return out
+        # v2.1 (N19): a relay count that moved once and then stopped is frozen,
+        # not live. "Moved at some point" let SGOV, EEM and EFA through.
+        if str(src).startswith(RELAY_PREFIX) and out["sessions_since_change"] > MAX_RELAY_FLAT_SESSIONS:
+            out["artifact"] = True
+            out["reason"] = (f"{src}: shares unchanged for the last {out['sessions_since_change']} sessions "
+                             f"(issuer feeds never went more than {MAX_RELAY_FLAT_SESSIONS}) — treated as frozen "
+                             f"until the count moves again")
+            return out
+        out["trustworthy"] = True
+        out["reason"] = f"issuer source ({src})" if not str(src).startswith(RELAY_PREFIX) else \
+            f"{src}: last share change {out['sessions_since_change']} session(s) ago"
         return out
 
     stale_all = _stale_aum_rows(g)
@@ -1240,6 +1269,29 @@ def selftest() -> dict:
                                         "price": px[:6], "shares_source": "thirdparty_stockanalysis"}))
     if not q_tp["trustworthy"]:
         f.append(f"a moving third-party reported series must be trustworthy: {q_tp}")
+
+    # v2.1 (N19): a relay count that moved and then froze is not trustworthy;
+    # the boundary is MAX_RELAY_FLAT_SESSIONS; issuer feeds are exempt.
+    def _series(src, shares):
+        k = len(shares)
+        return pd.DataFrame({"date": pd.to_datetime(dates[:k]), "ticker": "T", "shares_outstanding": shares,
+                             "price": px[:k], "shares_source": src})
+    moved = [1e6, 1.01e6, 1.02e6, 1.03e6]
+    q_fz = ticker_quality(_series("thirdparty_stockanalysis", moved + [1.03e6] * 6))
+    if q_fz["trustworthy"] or q_fz["sessions_since_change"] != 6 or "unchanged for the last 6" not in q_fz["reason"]:
+        f.append(f"a relay count flat for 6 sessions must be untrusted and say why: {q_fz}")
+    q_edge = ticker_quality(_series("thirdparty_stockanalysis", moved + [1.03e6] * MAX_RELAY_FLAT_SESSIONS))
+    if not q_edge["trustworthy"]:
+        f.append(f"a relay count flat for exactly {MAX_RELAY_FLAT_SESSIONS} sessions is still live: {q_edge}")
+    q_over = ticker_quality(_series("thirdparty_stockanalysis", moved + [1.03e6] * (MAX_RELAY_FLAT_SESSIONS + 1)))
+    if q_over["trustworthy"]:
+        f.append(f"a relay count flat for {MAX_RELAY_FLAT_SESSIONS + 1} sessions must be untrusted: {q_over}")
+    q_back = ticker_quality(_series("thirdparty_stockanalysis", moved + [1.03e6] * 6 + [1.05e6]))
+    if not q_back["trustworthy"]:
+        f.append(f"a relay count that moves again must be trusted again: {q_back}")
+    q_iss = ticker_quality(_series("issuer_spdr", moved + [1.03e6] * 8))
+    if not q_iss["trustworthy"]:
+        f.append(f"an issuer count flat for 8 sessions is genuine no-flow and stays trusted: {q_iss}")
 
     # ── issuer rows supersede estimates; a one-day outage doesn't reset them
     rows2 = []
