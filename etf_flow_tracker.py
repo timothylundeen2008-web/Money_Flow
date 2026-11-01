@@ -1,6 +1,29 @@
 """
-etf_flow_tracker.py  (v2.1 — October 2026)
+etf_flow_tracker.py  (v2.2 — November 2026)
 ──────────────────────────────────────────────────────────────────────────────
+v2.2 (2026-11-01, fix_status N31): every row is dated by the trading SESSION
+  it describes, not by the calendar day of the poll. Polls on weekends and
+  holidays used to add rows of their own (Sat 10/24, Sat 10/31, Sun 11/01), so
+  the frozen-count test counted those polls as flat sessions (IAI, FXI, SGOV
+  and INDA were excluded while flat only 3-4 trading days), a "20-session"
+  window held about 16 trading days, and the Flow Map said data ran "through"
+  a Sunday. Now:
+    * a poll is dated by session_for(): the last trading day whose close has
+      passed, in New York time (the runner's clock is UTC, which also put
+      evening polls on the next calendar day);
+    * a later poll for the same session replaces the earlier row, so a
+      weekend relay catch-up is kept as that session's count (real flow,
+      counted once);
+    * rows written before v2.2 are re-dated once from the time their poll
+      actually ran (MIGRATION_* tables, derived from the repo's commit
+      history). The scheduled poll has mostly run after midnight UTC since
+      late September, so Monday's poll was stored as Tuesday and Friday's as
+      Saturday;
+    * _upsert re-dates and collapses the whole store on every write (the
+      one-time migration happens on the first poll after deploy), and
+      load_history applies the same rule on read. Rows carry
+      session_dated = True once dated by session.
+
 v2.1 (2026-10-31, fix_status N19): ticker_quality() no longer trusts a
   third-party relay series just because its share count changed at some point.
   If the count has not changed for more than MAX_RELAY_FLAT_SESSIONS (4) it is
@@ -80,7 +103,7 @@ INTERPRETIVE CAUTIONS (build these into any UI that shows this)
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import date as _date, datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -562,6 +585,112 @@ def _issuer_source_for(ticker: str):
     return None
 
 
+# ── Session dating (v2.2, N31) ──────────────────────────────────────────────
+try:
+    import market_time as _mt
+except Exception:                       # weekday-only fallback; holidays then count as sessions
+    _mt = None
+_ET_CLOSE_HOUR = 16
+
+
+def _last_trading_day(d: _date) -> _date:
+    if _mt is not None:
+        return _mt.last_trading_day(d)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def session_for(when: datetime | None = None) -> str:
+    """The trading session a poll at `when` describes: the last trading day
+    whose 4pm New York close has passed. Naive datetimes are taken as UTC
+    (the Actions runner clock). Saturday, Sunday or a holiday -> the prior
+    trading day; a trading day before the close -> the prior trading day."""
+    from zoneinfo import ZoneInfo
+    when = when or datetime.now(timezone.utc)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    et = when.astimezone(ZoneInfo("America/New_York"))
+    d = et.date()
+    close = _mt.close_time(d).hour if _mt is not None and hasattr(_mt, "close_time") else _ET_CLOSE_HOUR
+    if _last_trading_day(d) == d and et.hour < close:
+        d -= timedelta(days=1)
+    return _last_trading_day(d).isoformat()
+
+
+def session_of_date(d) -> str:
+    """A stored calendar date -> the session it belongs to (weekend/holiday
+    dates fold into the prior trading day; trading days are unchanged)."""
+    return _last_trading_day(pd.Timestamp(d).date()).isoformat()
+
+
+# One-time migration of rows written before v2.2. Those polls dated relay and
+# estimate rows by the runner's UTC calendar day, and the scheduled poll
+# (cron 21:45 UTC) has mostly started after midnight UTC since late September,
+# so Monday's poll was stored as Tuesday ... Friday's as Saturday. Each row's
+# session below comes from the commit that last changed its share count, where
+# that commit's UTC day equals the row's date (the poll's own clock; 15
+# minutes allowed for a run that crossed midnight). Built 2026-11-01 from
+# Money_Flow history through 441a58b: all 1,671 non-issuer rows were dated
+# from a poll time. Labels not listed are already right (or a weekend/holiday
+# that folds into the prior session). Issuer rows carry the issuer's as-of
+# date and are never shifted. Rows written by v2.2 carry SESSION_COL = True
+# and are never looked up here.
+SESSION_COL = "session_dated"
+MIGRATION_LABEL_SESSION = {
+    "2026-08-05": "2026-08-04", "2026-08-07": "2026-08-06", "2026-08-27": "2026-08-26", "2026-08-28": "2026-08-27",
+    "2026-09-01": "2026-08-31", "2026-09-04": "2026-09-03", "2026-09-29": "2026-09-28", "2026-09-30": "2026-09-29",
+    "2026-10-01": "2026-09-30", "2026-10-02": "2026-10-01", "2026-10-06": "2026-10-05", "2026-10-07": "2026-10-06",
+    "2026-10-08": "2026-10-07", "2026-10-09": "2026-10-08", "2026-10-13": "2026-10-12", "2026-10-14": "2026-10-13",
+    "2026-10-15": "2026-10-14", "2026-10-16": "2026-10-15", "2026-10-20": "2026-10-19", "2026-10-21": "2026-10-20",
+    "2026-10-22": "2026-10-21", "2026-10-23": "2026-10-22", "2026-10-27": "2026-10-26", "2026-10-28": "2026-10-27",
+    "2026-10-29": "2026-10-28", "2026-10-30": "2026-10-29",
+}
+MIGRATION_ROW_SESSION = {
+    "2026-10-15|AMLP": "2026-10-15", "2026-10-15|IAI": "2026-10-15", "2026-10-15|IBB": "2026-10-15",
+    "2026-10-15|IGV": "2026-10-15", "2026-10-15|IHI": "2026-10-15", "2026-10-15|ITA": "2026-10-15",
+    "2026-10-15|IWM": "2026-10-15", "2026-10-15|PPH": "2026-10-15", "2026-10-15|QQQ": "2026-10-15",
+    "2026-10-15|SLV": "2026-10-15", "2026-10-15|SMH": "2026-10-15", "2026-10-15|SOXX": "2026-10-15",
+    "2026-10-15|TLT": "2026-10-15", "2026-10-15|USFR": "2026-10-15", "2026-10-23|PDBC": "2026-10-23",
+    "2026-10-23|QQQ": "2026-10-23", "2026-10-23|SLV": "2026-10-23", "2026-10-23|SMH": "2026-10-23",
+    "2026-10-23|TLT": "2026-10-23", "2026-10-23|USFR": "2026-10-23",
+}
+
+
+def _is_true(v) -> bool:
+    return v is True or str(v).strip().lower() in ("true", "1", "1.0")
+
+
+def _row_session(label: str, ticker: str, source, dated) -> str:
+    if not _is_true(dated) and not str(source).startswith("issuer"):
+        s = MIGRATION_ROW_SESSION.get(f"{label}|{ticker}") or MIGRATION_LABEL_SESSION.get(label)
+        if s:
+            return s
+    return session_of_date(label)
+
+
+def normalize_sessions(df: pd.DataFrame, new_mask=None) -> pd.DataFrame:
+    """Re-date every row to its trading session and keep ONE row per
+    (ticker, session): rows in `new_mask` (this poll) win; otherwise the row
+    with the later original date (the later poll) wins. Rows from before v2.2
+    are re-dated through the migration tables first. Every returned row is
+    marked SESSION_COL = True, so the result is idempotent."""
+    if df is None or df.empty or "date" not in df.columns:
+        return df
+    out = df.copy()
+    out["_orig"] = pd.to_datetime(out["date"]).dt.strftime("%Y-%m-%d")
+    out["_new"] = (np.asarray(new_mask, dtype=bool) if new_mask is not None
+                   else np.zeros(len(out), dtype=bool)).astype(int)
+    out["_seq"] = np.arange(len(out))
+    src = out["shares_source"] if "shares_source" in out.columns else pd.Series("", index=out.index)
+    dated = out[SESSION_COL] if SESSION_COL in out.columns else pd.Series(False, index=out.index)
+    out["date"] = [_row_session(l, t, so, d) for l, t, so, d in zip(out["_orig"], out["ticker"], src, dated)]
+    out[SESSION_COL] = True
+    out = (out.sort_values(["ticker", "date", "_new", "_orig", "_seq"])
+              .drop_duplicates(["ticker", "date"], keep="last"))
+    return out.drop(columns=["_orig", "_new", "_seq"]).reset_index(drop=True)
+
+
 def _snapshot_one(ticker: str) -> dict | None:
     """
     Tries, in order: the ticker's routed issuer source, then AUM-implied,
@@ -574,7 +703,7 @@ def _snapshot_one(ticker: str) -> dict | None:
     """
     shares = price = None
     used = None
-    row_date = datetime.now().date().isoformat()
+    row_date = session_for()            # v2.2: the session this poll describes (was the UTC calendar day)
     _LAST_ASOF.pop(ticker, None)
 
     # v4 ORDER, Sept 2026: issuer FIRST again, now that the issuer endpoints
@@ -586,7 +715,7 @@ def _snapshot_one(ticker: str) -> dict | None:
         if s:
             shares, price = s, p
             used = "issuer_" + primary.__name__.replace("_shares_from_", "")
-            row_date = _LAST_ASOF.get(ticker, row_date)
+            row_date = session_of_date(_LAST_ASOF.get(ticker, row_date))
 
     # v4.2: third-party relay of reported shares, before any estimate.
     if shares is None:
@@ -615,7 +744,7 @@ def _snapshot_one(ticker: str) -> dict | None:
 
     row = {"date": row_date, "ticker": ticker,
            "shares_outstanding": float(shares), "price": float(price),
-           "shares_source": used or "unknown"}
+           "shares_source": used or "unknown", SESSION_COL: True}
 
     if aum_shares and used != "aum_implied":
         divergence = abs(aum_shares - shares) / shares
@@ -631,21 +760,23 @@ def _snapshot_one(ticker: str) -> dict | None:
 
 
 def _upsert(store: str, new: pd.DataFrame) -> pd.DataFrame:
-    """Write rows keyed on (ticker, date); new rows replace old ones.
+    """Write rows keyed on (ticker, session); new rows replace old ones.
     v4: rows can carry different dates (issuer as-of dates vs poll date),
-    so replacement is per (ticker, date) pair, not 'today' only."""
+    so replacement is per (ticker, date) pair, not 'today' only.
+    v2.2: every row, old and new, is re-dated to its trading session first,
+    so a weekend/holiday row folds into the prior session (new rows win,
+    then the later original date). This migrates an existing store in place."""
     os.makedirs(os.path.dirname(store) or ".", exist_ok=True)
     new = new.copy()
     new["date"] = new["date"].astype(str)
     if os.path.exists(store):
         hist = pd.read_csv(store)
         hist["date"] = hist["date"].astype(str)
-        keys = set(zip(new["ticker"], new["date"]))
-        hist = hist[[(t, d) not in keys for t, d in zip(hist["ticker"], hist["date"])]]
         out = pd.concat([hist, new], ignore_index=True)
+        mask = np.r_[np.zeros(len(hist), dtype=bool), np.ones(len(new), dtype=bool)]
     else:
-        out = new
-    out = out.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last")
+        out, mask = new, np.ones(len(new), dtype=bool)
+    out = normalize_sessions(out, mask).sort_values(["ticker", "date"]).reset_index(drop=True)
     out.to_csv(store, index=False)
     return out
 
@@ -672,7 +803,7 @@ def backfill_issuer_history(tickers: list[str] | None = None, days: int = 90,
         f = pd.DataFrame({"date": h["date"].dt.date.astype(str), "ticker": tk,
                           "shares_outstanding": h["shares_outstanding"].astype(float),
                           "price": h["nav"].astype(float),
-                          "shares_source": "issuer_spdr"})
+                          "shares_source": "issuer_spdr", SESSION_COL: True})
         f = f.dropna(subset=["price"])
         frames.append(f)
         report[tk] = f"{len(f)} rows, {f['date'].min()} → {f['date'].max()}"
@@ -722,7 +853,7 @@ def snapshot_all(tickers: list[str] | None = None,
 def load_history(store: str = DEFAULT_STORE) -> pd.DataFrame:
     if not os.path.exists(store):
         return pd.DataFrame(columns=["date", "ticker", "shares_outstanding", "price"])
-    df = pd.read_csv(store)
+    df = normalize_sessions(pd.read_csv(store))      # v2.2: one row per trading session
     df["date"] = pd.to_datetime(df["date"])
     return df.sort_values(["ticker", "date"])
 
@@ -1139,7 +1270,7 @@ def aws_data_exchange_stub(dataset_arn: str = "", region: str = "us-east-1"):
 def selftest() -> dict:
     import tempfile
     f = []
-    dates = pd.bdate_range("2026-08-03", periods=30)
+    dates = pd.bdate_range("2026-09-08", periods=30)     # v2.2: no market holiday inside (a holiday row now folds into the prior session)
     rng = np.random.default_rng(1)
     px = 100 * np.cumprod(1 + rng.normal(0, 0.01, len(dates)))
 
@@ -1169,7 +1300,7 @@ def selftest() -> dict:
                      "shares_outstanding": 5e6 if i < 15 else 5.2e6, "price": p,
                      "shares_source": "issuer_spdr"})
     store = os.path.join(tempfile.mkdtemp(), "hist.csv")
-    pd.DataFrame(rows).to_csv(store, index=False)
+    pd.DataFrame(rows).assign(**{SESSION_COL: True}).to_csv(store, index=False)
     hist = load_history(store)
     q = {tk: ticker_quality(g) for tk, g in hist.groupby("ticker")}
 
@@ -1306,7 +1437,7 @@ def selftest() -> dict:
             rows2.append({"date": d.date().isoformat(), "ticker": "MIX",
                           "shares_outstanding": 1e6 * 1.01 ** i, "price": p, "shares_source": "issuer_spdr"})
     store2 = os.path.join(tempfile.mkdtemp(), "hist.csv")
-    pd.DataFrame(rows2).to_csv(store2, index=False)
+    pd.DataFrame(rows2).assign(**{SESSION_COL: True}).to_csv(store2, index=False)
     qm = ticker_quality(load_history(store2))
     if not qm["trustworthy"]:
         f.append(f"issuer series with a one-day aum outage must stay trustworthy: {qm}")
@@ -1324,6 +1455,113 @@ def selftest() -> dict:
     out3 = _upsert(s3, pd.DataFrame([{"date": "2026-09-23", "ticker": "A", "shares_outstanding": 5, "price": 1, "shares_source": "issuer_spdr"}]))
     if len(out3) != 2 or out3.loc[out3["date"] == "2026-09-23", "shares_source"].iloc[0] != "issuer_spdr":
         f.append(f"_upsert must replace only the matching (ticker, date): {out3.to_dict('records')}")
+    # ── v2.2 (N31): rows are dated by trading session, never by poll calendar day
+    U = timezone.utc
+    for when, want, why in (
+            (datetime(2026, 10, 31, 1, 3, tzinfo=U), "2026-10-30", "Fri 9:03pm ET poll (Sat 01:03 UTC)"),
+            (datetime(2026, 10, 31, 22, 35, tzinfo=U), "2026-10-30", "Saturday poll"),
+            (datetime(2026, 11, 1, 11, 15, tzinfo=U), "2026-10-30", "Sunday poll"),
+            (datetime(2026, 11, 2, 21, 45, tzinfo=U), "2026-11-02", "Monday 4:45pm ET scheduled poll"),
+            (datetime(2026, 11, 2, 15, 0, tzinfo=U), "2026-10-30", "Monday 10am ET, before the close"),
+            (datetime(2026, 11, 26, 22, 0, tzinfo=U), "2026-11-25", "Thanksgiving poll"),
+            (datetime(2026, 11, 27, 18, 30, tzinfo=U), "2026-11-27", "early-close day after 1pm ET"),
+            (datetime(2026, 10, 30, 21, 45), "2026-10-30", "naive clock read as UTC"),
+            (datetime(2026, 10, 27, 18, 0, tzinfo=U), "2026-10-26", "Tue 2pm EDT (18:00 UTC) is before the close"),
+            (datetime(2026, 11, 2, 20, 30, tzinfo=U), "2026-10-30", "Mon 3:30pm EST (20:30 UTC) is before the close"),
+            (datetime(2026, 11, 3, 0, 44, tzinfo=U), "2026-11-02", "Tue 00:44 UTC is Mon 7:44pm EST")):
+        if session_for(when) != want:
+            f.append(f"session_for: {why} must be {want}, got {session_for(when)}")
+    # a snapshot row is dated by session_for() and marked, whatever the runner's calendar day
+    _g = globals()
+    _saved = {k: _g[k] for k in ("session_for", "_issuer_source_for", "_shares_from_stockanalysis",
+                                 "_shares_from_aum_implied", "_shares_from_yfinance")}
+    try:
+        _g["session_for"] = lambda when=None: "2001-01-02"
+        _g["_issuer_source_for"] = lambda t: None
+        _g["_shares_from_stockanalysis"] = lambda t: (1e6, 10.0)
+        _g["_shares_from_aum_implied"] = lambda t: (None, None)
+        _g["_shares_from_yfinance"] = lambda t: (None, None)
+        _row = _snapshot_one("TST")
+        if not _row or _row["date"] != "2001-01-02" or not _is_true(_row.get(SESSION_COL)):
+            f.append(f"a relay snapshot must be dated by session_for() and marked session-dated: {_row}")
+    finally:
+        _g.update(_saved)
+    if session_of_date("2026-10-31") != "2026-10-30" or session_of_date("2026-11-02") != "2026-11-02" \
+            or session_of_date("2026-11-26") != "2026-11-25":
+        f.append("session_of_date: Sat -> Fri, Mon unchanged, holiday -> prior day")
+
+    # a store with weekend polls: Thu, Fri, Sat (relay catch-up), Sun (same), then a Monday poll
+    def r_(d, sh, px_=10.0, src="thirdparty_stockanalysis", dated=True):
+        return {"date": d, "ticker": "W", "shares_outstanding": sh, "price": px_, "shares_source": src,
+                SESSION_COL: dated}
+    s4 = os.path.join(tempfile.mkdtemp(), "h.csv")
+    pd.DataFrame([r_("2026-10-29", 100.0), r_("2026-10-30", 100.0), r_("2026-10-31", 110.0),
+                  r_("2026-11-01", 110.0)]).to_csv(s4, index=False)
+    lh = load_history(s4)
+    if [d.date().isoformat() for d in lh["date"]] != ["2026-10-29", "2026-10-30"] \
+            or lh["shares_outstanding"].iloc[-1] != 110.0:
+        f.append(f"load_history must fold weekend polls into Friday and keep the latest count: "
+                 f"{lh[['date', 'shares_outstanding']].to_dict('records')}")
+    raw_before = pd.read_csv(s4)
+    if len(raw_before) != 4:
+        f.append("load_history must not rewrite the store (only _upsert writes)")
+    o4 = _upsert(s4, pd.DataFrame([r_("2026-11-02", 112.0)]))
+    if list(o4["date"]) != ["2026-10-29", "2026-10-30", "2026-11-02"] or list(o4["shares_outstanding"]) != [100.0, 110.0, 112.0]:
+        f.append(f"_upsert must migrate weekend rows into Friday on write: {o4[['date', 'shares_outstanding']].to_dict('records')}")
+    if pd.read_csv(s4)["date"].astype(str).map(lambda d: pd.Timestamp(d).dayofweek).ge(5).any():
+        f.append("no weekend date may remain in the stored file after a write")
+    fl4 = compute_flows(s4)
+    if abs(float(fl4["net_flow"].sum(skipna=True)) - (12.0 * 10.0)) > 1e-9:
+        f.append(f"total flow must be preserved by the fold (Thu 100 -> Mon 112 = 12 shares x $10): {fl4['net_flow'].tolist()}")
+    # this poll wins over an older weekend row mapped to the same session
+    s5 = os.path.join(tempfile.mkdtemp(), "h.csv")
+    pd.DataFrame([r_("2026-10-30", 100.0), r_("2026-10-31", 105.0)]).to_csv(s5, index=False)
+    o5 = _upsert(s5, pd.DataFrame([r_("2026-10-30", 107.0)]))
+    if len(o5) != 1 or o5["shares_outstanding"].iloc[0] != 107.0:
+        f.append(f"a new poll for a session must replace an older weekend row for it: {o5.to_dict('records')}")
+    # idempotent
+    n1 = normalize_sessions(pd.read_csv(s4))
+    if not n1.equals(normalize_sessions(n1)):
+        f.append("normalize_sessions must be idempotent")
+    # the frozen-count test counts trading sessions: Mon-Wed moving, flat Wed->Fri, plus Sat/Sun polls
+    wk = [("2026-10-19", 1.00e6), ("2026-10-20", 1.01e6), ("2026-10-21", 1.02e6), ("2026-10-22", 1.03e6),
+          ("2026-10-23", 1.04e6), ("2026-10-24", 1.04e6), ("2026-10-26", 1.05e6), ("2026-10-27", 1.06e6),
+          ("2026-10-28", 1.07e6), ("2026-10-29", 1.07e6), ("2026-10-30", 1.07e6), ("2026-10-31", 1.07e6),
+          ("2026-11-01", 1.07e6)]
+    s6 = os.path.join(tempfile.mkdtemp(), "h.csv")
+    pd.DataFrame([dict(r_(d, v), ticker="F") for d, v in wk]).to_csv(s6, index=False)
+    q6 = ticker_quality(load_history(s6))
+    if q6.get("sessions_since_change") != 2 or not q6["trustworthy"]:
+        f.append(f"flat Thu+Fri with weekend polls is 2 sessions and still live (was counted 4): {q6}")
+    # one-time migration of pre-v2.2 rows (unmarked): re-dated from the poll's real time
+    if _row_session("2026-10-06", "TLT", "thirdparty_stockanalysis", None) != "2026-10-05":
+        f.append("unmarked relay row labelled Tue 10/06 (polled Mon evening ET) must move to Mon 10/05")
+    if _row_session("2026-10-06", "XLK", "issuer_spdr", None) != "2026-10-06":
+        f.append("an issuer row keeps its as-of date; the migration never shifts it")
+    if _row_session("2026-10-06", "TLT", "thirdparty_stockanalysis", True) != "2026-10-06":
+        f.append("a row already dated by session (v2.2) must never be looked up in the migration table")
+    if _row_session("2026-10-15", "TLT", "thirdparty_stockanalysis", "") != "2026-10-15" or \
+            _row_session("2026-10-15", "SPY", "thirdparty_stockanalysis", "") != "2026-10-14":
+        f.append("10/15: rows re-polled Thu evening stay Thu; the rest (Wed-evening poll) move to Wed")
+    if _row_session("2026-11-01", "TLT", "thirdparty_stockanalysis", "") != "2026-10-30":
+        f.append("an unlisted weekend label folds into the prior session")
+    s7 = os.path.join(tempfile.mkdtemp(), "h.csv")
+    pd.DataFrame([r_(d, v, dated=None) for d, v in (("2026-10-27", 100.0), ("2026-10-28", 101.0),
+                  ("2026-10-29", 102.0), ("2026-10-30", 103.0), ("2026-10-31", 104.0), ("2026-11-01", 105.0))]
+                 + [dict(r_("2026-10-26", 50.0, src="issuer_spdr", dated=None), ticker="X")]).to_csv(s7, index=False)
+    o7 = _upsert(s7, pd.DataFrame([r_("2026-11-02", 106.0)]))
+    w7 = o7[o7["shares_source"].str.startswith("thirdparty")]
+    if list(w7["date"]) != ["2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30", "2026-11-02"] \
+            or list(w7["shares_outstanding"]) != [100.0, 101.0, 102.0, 103.0, 105.0, 106.0]:
+        f.append(f"pre-v2.2 Tue-Sat labels must become Mon-Fri sessions, the Sunday poll winning Friday: "
+                 f"{w7[['date', 'shares_outstanding']].to_dict('records')}")
+    if o7.loc[o7["ticker"] == "X", "date"].tolist() != ["2026-10-26"]:
+        f.append("an unmarked issuer row must keep its as-of date through the migration")
+    if not o7[SESSION_COL].map(_is_true).all():
+        f.append("every row must be marked session-dated after a write")
+    o7b = _upsert(s7, pd.DataFrame([r_("2026-11-02", 106.0)]))
+    if not o7b[["date", "ticker", "shares_outstanding"]].equals(o7[["date", "ticker", "shares_outstanding"]]):
+        f.append("a second write must not shift migrated rows again")
     return {"ok": not f, "failures": f,
             "quality": {k: (x["trustworthy"], x["aum_update_rate"], x["price_mirror_corr"]) for k, x in q.items()}}
 
