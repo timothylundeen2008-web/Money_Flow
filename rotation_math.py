@@ -1,6 +1,14 @@
 """
-rotation_math.py  (v3 — unified spread formula + rotation history)
+rotation_math.py  (v3.1 — November 2026)
 ──────────────────────────────────────────────────────────────────
+v3.1 (2026-11-01, fix_status N17): the quadrant vote is RRG BREADTH, not
+  money. get_rotation_summary() used to call more Improving+Leading than
+  Weakening+Lagging sectors "Bullish rotation" (and the app labelled the
+  counts "inflow / outflow"). Quadrants are relative price strength (Tier C);
+  creations and redemptions (Tier A) live in flow_map. rrg_breadth() states
+  the count plainly; the "bias" key now carries that wording.
+
+(v3 — unified spread formula + rotation history)
 RRG Mathematics using proper timeframe windows.
 
 CHANGE LOG v2 → v3:
@@ -277,15 +285,25 @@ def rank_signals(df: pd.DataFrame) -> pd.DataFrame:
 
 # ── Summary helper ─────────────────────────────────────────────────────────────
 
+def rrg_breadth(quad_counts: dict) -> dict:
+    """How many sectors sit in Improving or Leading, out of all classified.
+    Relative strength vs the equal-weighted sector average — Tier C, never
+    money: every sector can fall and some will still be 'Leading'."""
+    up = int(quad_counts.get("Improving", 0)) + int(quad_counts.get("Leading", 0))
+    total = int(sum(int(v) for k, v in quad_counts.items()
+                    if k in ("Improving", "Leading", "Weakening", "Lagging")))
+    return {"up": up, "total": total, "value": f"{up} of {total}" if total else "n/a",
+            "label": f"RRG breadth: {up} of {total} sectors improving or leading" if total else "RRG breadth: n/a",
+            "note": "relative strength vs the sector average — not money flow"}
+
+
 def get_rotation_summary(df: pd.DataFrame) -> dict:
     quad_counts = df["quadrant"].value_counts().to_dict()
-    inflow  = quad_counts.get("Improving", 0) + quad_counts.get("Leading", 0)
-    outflow = quad_counts.get("Weakening", 0) + quad_counts.get("Lagging", 0)
-    bias = ("Bullish rotation" if inflow > outflow else
-            "Bearish rotation" if outflow > inflow else "Neutral rotation")
+    br = rrg_breadth(quad_counts)
     return {
         "quadrant_counts":    quad_counts,
-        "bias":               bias,
+        "bias":               br["label"],        # v3.1: was "Bullish/Bearish rotation" (N17)
+        "rrg_breadth":        br,
         "top_accumulation":   df[df["quadrant"] == "Improving"].nlargest(3, "signal_score")["sector"].tolist(),
         "top_momentum":       df[df["quadrant"] == "Leading"].nlargest(3, "signal_score")["sector"].tolist(),
         "distribution_watch": df[df["quadrant"] == "Weakening"].nlargest(3, "signal_score")["sector"].tolist(),

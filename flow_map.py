@@ -1,6 +1,12 @@
 """
-flow_map.py  (v1.2 — November 2026)
+flow_map.py  (v1.3 — November 2026)
 ──────────────────────────────────
+v1.3 (2026-11-01, fix_status N17): market_card(summary) turns the verdict into
+  the Money Flow dashboard's headline "Money flow (Tier A)" banner (state,
+  colour, the reading, the first recommended step). It replaces the old
+  "Market bias: Bullish" card, which counted RRG quadrants and called them
+  inflow/outflow.
+
 v1.2 (2026-11-01): the stocks-vs-safety verdict is built for accuracy.
   * Thin classes (under half their funds measured) are shown but left out of
     the verdict; the evidence says what the reading would be with them.
@@ -570,6 +576,39 @@ def money_verdict(classes: pd.DataFrame, groups: pd.DataFrame, funds: pd.DataFra
             "history": [{k: h[k] for k in ("date", "stocks", "safety", "kind")} for h in (history or [])]}
 
 
+CARD_COLORS = {"in": "#1D9E75", "out": "#D85A30", "borderline": "#BA7517", "flat": "#888780", "none": "#6b7280"}
+
+
+def market_card(summary: Optional[dict]) -> dict:
+    """The dashboard headline for market-wide money flow, from a bridge_summary.
+    Wording follows the verdict's state exactly; a missing reading says
+    'no reading', never 'neutral'."""
+    v = (summary or {}).get("verdict") or {}
+    rec = v.get("record") or {}
+    cov = (summary or {}).get("coverage") or {}
+    st_ = v.get("state")
+    s = rec.get("stocks_pct")
+    cov_txt = f"{cov.get('measured', 0)} of {cov.get('total', 0)} funds measured"
+    thru = (summary or {}).get("data_through")
+    base = {"label": "Money flow (Tier A · ETF creations/redemptions)", "data_through": thru,
+            "coverage": cov_txt, "step": (v.get("steps") or [None])[0], "verdict": v.get("verdict")}
+    if not st_ or st_ == "unavailable":
+        return {**base, "value": "No reading", "color": CARD_COLORS["none"],
+                "sub": f"too few measured funds — a data gap, not neutral · {cov_txt}"}
+    if st_ == "borderline":
+        n = v.get("sessions_in_state") or 0
+        return {**base, "value": "Borderline", "color": CARD_COLORS["borderline"],
+                "sub": f"stocks {s:+.2f}% · within one typical day of the ±{MATERIAL_PCT}% line · "
+                       f"{n} session{'s' if n != 1 else ''} · not a signal · {cov_txt}"}
+    val, col = {"new_money": ("Into stocks (new money)", "in"), "into_stocks": ("Into stocks (from safety)", "in"),
+                "out_of_stocks": ("Out of stocks (to safety)", "out"),
+                "leaving_both": ("Out of stocks (not to safety)", "out"),
+                "stocks_flat": ("No material move", "flat")}.get(st_, (st_, "none"))
+    return {**base, "value": val, "color": CARD_COLORS[col],
+            "sub": f"stocks {s:+.2f}% · {rec.get('margin_days', 0):.1f} typical days past the line · {cov_txt}"
+            if s is not None else cov_txt}
+
+
 def append_history(hist: Optional[pd.DataFrame], record: Optional[dict]) -> pd.DataFrame:
     """One row per session in HISTORY_FILE. A re-publish for the same session
     replaces that session's row (the latest publish is what the brief showed);
@@ -983,6 +1022,35 @@ def selftest() -> dict:
         f.append(f"append_history: one row per session, latest publish wins, fixed columns: {h2.to_dict('records')}")
     if not append_history(h2, None).equals(h2):
         f.append("append_history must leave the log unchanged when there is no record (unavailable day)")
+
+    # v1.3 (N17): the dashboard card follows the verdict state; never "Bullish", never "neutral" for no data
+    c_b = market_card({"verdict": v_b, "coverage": {"measured": 40, "total": 58}})
+    c_f = market_card({"verdict": v_f, "coverage": {"measured": 40, "total": 58}})
+    c_u = market_card({"verdict": {"state": "unavailable"}})
+    c_n = market_card(None)
+    if c_b["value"] != "Borderline" or "not a signal" not in c_b["sub"] or c_b["color"] != CARD_COLORS["borderline"] \
+            or not (c_b["step"] or "").startswith("Model portfolio"):
+        f.append(f"market_card borderline: {c_b}")
+    if not c_f["value"].startswith("Into stocks") or c_f["color"] != CARD_COLORS["in"]:
+        f.append(f"market_card firm new money: {c_f}")
+    if c_u["value"] != "No reading" or "not neutral" not in c_u["sub"] or c_n["value"] != "No reading":
+        f.append(f"market_card with no reading must say so, not neutral: {c_u} {c_n}")
+    for c_ in (c_b, c_f, c_u, c_n):
+        if any(w in (c_["value"] + c_["sub"]).lower() for w in ("bullish", "bearish", "inflow ·")):
+            f.append(f"market_card must never use the old vote wording: {c_}")
+    try:
+        import rotation_math as _rm
+        br = _rm.rrg_breadth({"Improving": 4, "Leading": 2, "Weakening": 3, "Lagging": 2})
+        if br["value"] != "6 of 11" or "not money" not in br["note"] or "Bull" in br["label"]:
+            f.append(f"rrg_breadth must state the count plainly and say it is not money: {br}")
+        if _rm.rrg_breadth({})["value"] != "n/a":
+            f.append("rrg_breadth with no quadrants must be n/a")
+        sm = _rm.get_rotation_summary(pd.DataFrame({"quadrant": ["Leading", "Lagging", "Improving"], "signal_score": [1, 2, 3],
+                                                     "sector": ["a", "b", "c"], "rs_ratio": [1, 1, 1], "rs_momentum": [1, 1, 1]}))
+        if "Bullish" in sm["bias"] or sm["rrg_breadth"]["value"] != "2 of 3":
+            f.append(f"get_rotation_summary must no longer call the vote Bullish: {sm['bias']}")
+    except Exception as e:
+        f.append(f"rotation_math check failed: {type(e).__name__}: {e}")
 
     # the published summary is JSON-safe and carries every part
     import json as _json

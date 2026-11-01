@@ -1,6 +1,13 @@
 """
-Institutional Rotation Dashboard  (v6)
+Institutional Rotation Dashboard  (v6.1)
 ──────────────────────────────────────
+Changes v6 -> v6.1 (Nov 2026, fix_status N17):
+  [CRITICAL]  The "Market bias: Bullish · 6 inflow · 5 outflow" card counted RRG
+              quadrants (relative price strength, Tier C) and called them money.
+              Replaced by (1) a full-width "Money flow (Tier A)" banner built from
+              the Flow Map verdict (creations/redemptions, borderline-aware), and
+              (2) an "RRG breadth" card stating the quadrant count as what it is.
+
 Changes v5 -> v6 (July 2026 cross-dashboard audit):
   [CRITICAL]  Volume-methodology text corrected everywhere: the code computes
               a 5-day avg vs prior-20-day baseline, not today-vs-20-day, and
@@ -389,16 +396,39 @@ lagging_n   = quad_counts.get("Lagging",   0)
 top_mom   = df.loc[df["rs_momentum"].idxmax()]
 top_accum = df.loc[df["spread"].idxmax()]
 
-# Market bias
-inflow  = leading_n + improving_n
-outflow = weakening_n + lagging_n
-bias_label = ("Bullish" if inflow > outflow else "Bearish" if outflow > inflow else "Neutral")
-bias_color = "#1D9E75" if bias_label == "Bullish" else "#D85A30" if bias_label == "Bearish" else "#888780"
+# v6.1 (N17): money first. The headline is the Flow Map verdict (Tier A);
+# the quadrant count is shown as RRG breadth, never as inflow/outflow.
+from rotation_math import rrg_breadth
+_breadth = rrg_breadth(quad_counts)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_flow_verdict():
+    import flow_map as _fm
+    from etf_flow_tracker import compute_flows, ticker_quality
+    return _fm.bridge_summary(compute_flows(), _fm.DEFAULT_WINDOW, ticker_quality)
+
+
+try:
+    import flow_map as _fmc
+    _card = _fmc.market_card(load_flow_verdict())
+except Exception as _fc_e:
+    _card = {"label": "Money flow (Tier A)", "value": "No reading", "color": "#6b7280",
+             "sub": f"flow verdict unavailable ({type(_fc_e).__name__}) — a data gap, not neutral",
+             "step": None, "data_through": None}
+_step = f'<div class="metric-sub" style="margin-top:6px">Next step: {_card["step"]}</div>' if _card.get("step") else ""
+st.markdown(f"""
+<div class="metric-card" style="margin-bottom:10px">
+  <div class="metric-label">{_card['label']}{' · data through ' + _card['data_through'] if _card.get('data_through') else ''}</div>
+  <div class="metric-value" style="color:{_card['color']}">{_card['value']}</div>
+  <div class="metric-sub">{_card['sub']}</div>
+  {_step}
+</div>""".replace("$", "&#36;"), unsafe_allow_html=True)
 
 stealth_sectors = df[df["stealth_signal"] != "None"]["sector"].tolist()
 
 metrics = [
-    {"label": "Market bias",        "val": bias_label,          "sub": f"{inflow} inflow · {outflow} outflow",      "color": bias_color},
+    {"label": "RRG breadth",        "val": _breadth["value"],   "sub": "improving or leading · relative strength, not money", "color": "#888780"},
     {"label": "Leading sectors",    "val": str(leading_n),      "sub": "Outperforming & accelerating",              "color": "#1D9E75"},
     {"label": "Improving sectors",  "val": str(improving_n),    "sub": "Early accumulation — highest alpha",        "color": "#378ADD"},
     {"label": "Top RS momentum",    "val": top_mom["ticker"],   "sub": f"{top_mom['sector']} · {top_mom['rs_momentum']:.1f}", "color": "#BA7517"},
@@ -1180,7 +1210,8 @@ if flow_df is not None and not flow_df.empty:
         "Bubble size = Flow Score · "
         "X-axis: right = accelerating above 3M trend · "
         "Y-axis: avg volume ratio (5d avg vs prior-20d baseline; continuous, not spike count) · "
-        "Green = inflow · Red = outflow · Top-right = highest conviction"
+        "Green = buying pressure · Red = selling pressure (accumulation score, Tier B — not money flow) · "
+        "Top-right = highest conviction"
     )
 
     fig_bubble = go.Figure()
