@@ -1,6 +1,15 @@
 """
-rotation_math.py  (v3.1 — November 2026)
+rotation_math.py  (v3.2 — November 2026)
 ──────────────────────────────────────────────────────────────────
+v3.2 (2026-11-01, fix_status N32): `stealth_signal` — shown on the dashboard
+  and worth 0-2 points in signal_score — now comes from flow_metrics'
+  stealth_label (Tier B: CMF pressure, persistence and A/D absorption, gated
+  on QUIET volume). The old rule here used four price conditions and no
+  volume at all; flow_metrics' own docstring records that it "fired on any
+  ordinary uptrend". With no stealth_label available the flag is "None" —
+  never the price-only fallback. The brief and signal_outcomes already used
+  stealth_label, so the dashboard now agrees with them.
+
 v3.1 (2026-11-01, fix_status N17): the quadrant vote is RRG BREADTH, not
   money. get_rotation_summary() used to call more Improving+Leading than
   Weakening+Lagging sectors "Bullish rotation" (and the app labelled the
@@ -140,39 +149,27 @@ def compute_spread(df: pd.DataFrame) -> pd.DataFrame:
 
 # ── Step 3b: Stealth accumulation (rolling multi-day signal) ──────────────────
 
+STEALTH_LABELS = ("Stealth", "Strong Stealth")
+
+
 def compute_stealth_accumulation(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Stealth Accumulation: sustained above-average volume + positive price action
-    over multiple days WITHOUT a single dramatic spike.
+    Stealth accumulation flag for the dashboard and signal_score, taken from
+    flow_metrics.stealth_accumulation (stealth_label, computed per sector by
+    data_fetcher from OHLCV): buying pressure (CMF > +0.05), sustained (CMF
+    positive on >= 60% of the window) and absorbed (A/D rising faster than
+    price), and only on QUIET volume — a volume spike disqualifies it.
 
-    This is how most large institutional positions are actually built —
-    quietly across 4-7 sessions rather than one block trade.
-
-    Uses proxies since we only have ETF-level timeframe data:
-      - 1W perf > 0  (positive price trend)
-      - spread > 0   (accelerating vs 3M run-rate)
-      - 1D perf > 0  (today positive — continuation)
-      - 1M > 1W perf (momentum building, not fading)
-
-    If 3 or 4 of these are true simultaneously = Stealth Accumulation signal.
+    v3.2: the previous rule here was price-only (1W > 0, spread > 0, 1D > 0,
+    1M > 1W) despite promising volume, and fired on most sectors in any
+    uptrend. It is gone; there is deliberately no price-only fallback.
     """
     df = df.copy()
-
-    def _stealth(row):
-        conditions = [
-            row.get("perf_1w", 0) > 0,
-            row.get("spread", 0) > 0,
-            row.get("perf_1d", 0) > 0,
-            row.get("perf_1m", 0) > row.get("perf_1w", 0),
-        ]
-        count = sum(conditions)
-        if count == 4:
-            return "Strong Stealth"
-        if count == 3:
-            return "Stealth"
-        return "None"
-
-    df["stealth_signal"] = df.apply(_stealth, axis=1)
+    if "stealth_label" in df.columns:
+        lab = df["stealth_label"].astype(str)
+        df["stealth_signal"] = lab.where(lab.isin(STEALTH_LABELS), "None")
+    else:
+        df["stealth_signal"] = "None"
     return df
 
 

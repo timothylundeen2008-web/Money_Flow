@@ -1,6 +1,17 @@
 """
-Institutional Rotation Dashboard  (v6.1)
+Institutional Rotation Dashboard  (v6.2)
 ──────────────────────────────────────
+Changes v6.1 -> v6.2 (Nov 2026, fix_status N32):
+  [HIGH]      Removed unsupported claims: "Historically highest alpha entry
+              point" and "Early accumulation — highest alpha" (no base rate
+              exists; Improving is a Tier C relative-strength quadrant, not
+              accumulation). The callout now says what the quadrant measures
+              and that it needs a Tier A/B leg (confluence rule).
+  [HIGH]      Stealth now shows flow_metrics' volume-aware stealth_label
+              (rotation_math v3.2), described as Tier B pressure, not money.
+              The card and the signals panel list sectors in the SAME order
+              (accumulation score), so they can no longer appear to disagree.
+
 Changes v6 -> v6.1 (Nov 2026, fix_status N17):
   [CRITICAL]  The "Market bias: Bullish · 6 inflow · 5 outflow" card counted RRG
               quadrants (relative price strength, Tier C) and called them money.
@@ -425,15 +436,17 @@ st.markdown(f"""
   {_step}
 </div>""".replace("$", "&#36;"), unsafe_allow_html=True)
 
-stealth_sectors = df[df["stealth_signal"] != "None"]["sector"].tolist()
+_sk = "accumulation_score" if "accumulation_score" in df.columns else "signal_score"
+stealth_sectors = (df[df["stealth_signal"] != "None"].sort_values(_sk, ascending=False)["sector"].tolist())
 
 metrics = [
     {"label": "RRG breadth",        "val": _breadth["value"],   "sub": "improving or leading · relative strength, not money", "color": "#888780"},
     {"label": "Leading sectors",    "val": str(leading_n),      "sub": "Outperforming & accelerating",              "color": "#1D9E75"},
-    {"label": "Improving sectors",  "val": str(improving_n),    "sub": "Early accumulation — highest alpha",        "color": "#378ADD"},
+    {"label": "Improving sectors",  "val": str(improving_n),    "sub": "Below the sector average, momentum turning up", "color": "#378ADD"},
     {"label": "Top RS momentum",    "val": top_mom["ticker"],   "sub": f"{top_mom['sector']} · {top_mom['rs_momentum']:.1f}", "color": "#BA7517"},
     {"label": "Weakening sectors",  "val": str(weakening_n),    "sub": "Distribution phase",                        "color": "#D85A30"},
-    {"label": "Stealth signals",    "val": str(len(stealth_sectors)), "sub": ", ".join(stealth_sectors[:3]) or "None detected", "color": "#534AB7"},
+    {"label": "Stealth (quiet buying pressure)", "val": f"{len(stealth_sectors)} of {len(df)}",
+     "sub": ", ".join(stealth_sectors[:3]) or "None detected", "color": "#534AB7"},
 ]
 
 cols = st.columns(6)
@@ -636,24 +649,26 @@ with col_signals:
         st.markdown(f"""
         <div style="background:rgba(55,138,221,0.12);border:1px solid rgba(55,138,221,0.4);
              border-radius:8px;padding:8px 12px;margin-bottom:10px">
-          <span style="font-size:13px;font-weight:600;color:#378ADD">⭐ Early Accumulation Signal</span><br>
+          <span style="font-size:13px;font-weight:600;color:#378ADD">⭐ Improving quadrant (relative strength)</span><br>
           <span style="font-size:12px;color:#9ca3af">
-            <b style="color:#e5e7eb">{improving_names}</b> in Improving quadrant —
-            underperforming but momentum turning. Historically highest alpha entry point.
+            <b style="color:#e5e7eb">{improving_names}</b> — still below the sector average, but relative
+            momentum is turning up. A Tier C price signal with no base rate yet: a candidate needs a Tier A
+            or Tier B leg before it is a position (confluence rule).
           </span>
         </div>""", unsafe_allow_html=True)
 
     # Stealth accumulation callout
-    stealth_df = df[df["stealth_signal"] != "None"].sort_values("signal_score", ascending=False)
+    stealth_df = df[df["stealth_signal"] != "None"].sort_values(_sk, ascending=False)
     if not stealth_df.empty:
         stealth_names = ", ".join(stealth_df["sector"].head(3).tolist())
         st.markdown(f"""
         <div style="background:rgba(83,74,183,0.12);border:1px solid rgba(83,74,183,0.4);
              border-radius:8px;padding:8px 12px;margin-bottom:10px">
-          <span style="font-size:13px;font-weight:600;color:#7C74D4">🔍 Stealth Accumulation</span><br>
+          <span style="font-size:13px;font-weight:600;color:#7C74D4">🔍 Stealth (quiet buying pressure) · {len(stealth_df)} of {len(df)}</span><br>
           <span style="font-size:12px;color:#9ca3af">
-            <b style="color:#e5e7eb">{stealth_names}</b> showing sustained multi-day
-            positive breadth without a dramatic spike — how large positions are actually built.
+            <b style="color:#e5e7eb">{stealth_names}</b> — money-flow pressure (CMF) positive and sustained, A/D
+            rising faster than price, on volume below the spike threshold. Tier B pressure, not money:
+            creations and redemptions (Tier A) are in the Flow Map.
           </span>
         </div>""", unsafe_allow_html=True)
 

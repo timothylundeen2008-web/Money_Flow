@@ -1049,6 +1049,21 @@ def selftest() -> dict:
                                                      "sector": ["a", "b", "c"], "rs_ratio": [1, 1, 1], "rs_momentum": [1, 1, 1]}))
         if "Bullish" in sm["bias"] or sm["rrg_breadth"]["value"] != "2 of 3":
             f.append(f"get_rotation_summary must no longer call the vote Bullish: {sm['bias']}")
+        # N32: stealth comes from flow_metrics' volume-aware label; never the old price-only rule
+        up_all = dict(perf_1w=2.0, spread=1.0, perf_1d=0.5, perf_1m=5.0)        # passed all 4 old price checks
+        st_df = _rm.compute_stealth_accumulation(pd.DataFrame([
+            dict(up_all, sector="A", stealth_label="Strong Stealth"), dict(up_all, sector="B", stealth_label="Weak / Mixed"),
+            dict(up_all, sector="C", stealth_label="None"), dict(up_all, sector="D", stealth_label="Stealth")]))
+        if st_df["stealth_signal"].tolist() != ["Strong Stealth", "None", "None", "Stealth"]:
+            f.append(f"stealth_signal must follow stealth_label (price-only uptrend alone is not stealth): "
+                     f"{st_df['stealth_signal'].tolist()}")
+        if _rm.compute_stealth_accumulation(pd.DataFrame([dict(up_all, sector="A")]))["stealth_signal"].iloc[0] != "None":
+            f.append("with no stealth_label the flag must be None, never the price-only fallback")
+        rk = pd.DataFrame([dict(sector="A", quadrant="Improving", spread=0.0, rs_momentum=100.0, stealth_signal="Strong Stealth"),
+                           dict(sector="B", quadrant="Improving", spread=0.0, rs_momentum=100.0, stealth_signal="None")])
+        rk = _rm.rank_signals(rk)
+        if not rk.set_index("sector").loc["A", "signal_score"] > rk.set_index("sector").loc["B", "signal_score"]:
+            f.append("signal_score's stealth bonus must follow the (volume-aware) stealth flag")
     except Exception as e:
         f.append(f"rotation_math check failed: {type(e).__name__}: {e}")
 
