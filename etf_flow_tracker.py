@@ -1,6 +1,28 @@
 """
-etf_flow_tracker.py  (v2.3 — November 2026)
+etf_flow_tracker.py  (v2.4 — November 2026)
 ──────────────────────────────────────────────────────────────────────────────
+v2.4 (2026-11-01, fix_status N30 step 2): three issuer sources that the
+  Issuer Probe (logs/issuer_probe/2026-11-01.json) found reachable from the
+  GitHub runner, naming the right fund, and agreeing with the relay:
+    GLD   SSGA product page   "Shares Outstanding 365.30 M" (as of Oct 30)
+    KMLM  KraneShares page    "Shares Outstanding 19,400,002" (Data as of 10/30/2026)
+    HACK  Amplify page        "Shares Outstanding 28,500,000" (Data as of 10/30/2026)
+  The relay had GLD frozen at 352.40M since late September; SSGA shows
+  365.30M. Rules at the switch (compute_flows):
+    * issuer outranks relay: after a fund's first issuer row, relay rows are
+      not informative (a failed issuer day is a gap the next issuer row spans);
+    * continuity, judged like for like: the poll also records the relay's
+      SAME-DAY count (relay_shares) for these funds. If the first issuer count
+      matches it (within RELAY_CONTINUITY_PCT or RELAY_CONTINUITY_SHARES) the
+      series runs on (KMLM, HACK); if not, or with no same-day relay count,
+      it breaks (GLD): no flow at the boundary and none counted before it, so
+      ~13M unrecorded shares are never booked as one day's inflow. Comparing
+      with the PREVIOUS day's relay count instead would mistake an ordinary
+      day's creations (HACK +0.53% on 10/30) for a broken relay.
+  iShares (SGOV, EFA, EEM, FXI, INDA, RING, EWJ, TIP) and WisdomTree (USFR)
+  still refuse the runner; Invesco, ALPS, USCF, VanEck and Vanguard pages
+  fill the count with JavaScript. Those stay on the relay.
+
 v2.3 (2026-11-01, fix_status N18): a day whose flow exceeds
   IMPLAUSIBLE_DAILY_FLOW_PCT of AUM is still FLAGGED, but for REPORTED share
   counts (issuer or relay) it is no longer dropped. Dropping one day broke
@@ -488,6 +510,74 @@ def _shares_from_schwab(ticker: str) -> tuple[float | None, float | None]:
         return None, None
 
 
+# ── v2.4 (N30): issuer product pages verified by the Issuer Probe ───────────
+ISSUER_PAGES = {
+    "GLD":  ("ssga_page",   "https://www.ssga.com/us/en/intermediary/etfs/spdr-gold-shares-gld"),
+    "KMLM": ("kraneshares", "https://kraneshares.com/kmlm/"),
+    "HACK": ("amplify",     "https://amplifyetfs.com/hack/"),
+}
+_PAGE_MULT = {"K": 1e3, "M": 1e6, "B": 1e9}
+_ASOF_RE = r"as of\s+(\d{1,2}/\d{1,2}/\d{4}|[A-Z][a-z]{2,8}\.?\s+\d{1,2},?\s+\d{4})"
+
+
+def parse_issuer_fund_page(html: str, ticker: str) -> tuple[float, str]:
+    """(shares_outstanding, as_of_iso) from an issuer product page that prints
+    'Shares Outstanding <number>[ M]' with an 'as of <date>' before it (SSGA,
+    KraneShares, Amplify layouts, verified 2026-11-01). The number must follow
+    the label directly, so prose like '...divided by the number of shares
+    outstanding. $358.64' is never read. Raises ValueError with the reason."""
+    import re
+    title = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
+    head = title.group(1) if title else html[:4000]
+    if not re.search(rf"\b{re.escape(ticker)}\b", head, re.I):
+        raise ValueError(f"page is not for {ticker} (title: {head.strip()[:80]!r})")
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"&nbsp;|&#160;", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    m = re.search(r"Shares Outstanding\s+(\d[\d,]*(?:\.\d+)?)\s*([KMB])?(?![\w%])", text)
+    if not m:
+        raise ValueError("no number directly after 'Shares Outstanding' (count may be filled by JavaScript)")
+    shares = float(m.group(1).replace(",", "")) * _PAGE_MULT.get(m.group(2) or "", 1.0)
+    if shares < 1e4:
+        raise ValueError(f"implausible share count {shares}")
+    dates = list(re.finditer(_ASOF_RE, text[max(0, m.start() - 2000): m.start()]))
+    if not dates:
+        raise ValueError("no 'as of' date before 'Shares Outstanding'")
+    asof = pd.to_datetime(dates[-1].group(1).replace(".", ""), errors="coerce")
+    if pd.isna(asof):
+        raise ValueError(f"unreadable as-of date {dates[-1].group(1)!r}")
+    return shares, asof.date().isoformat()
+
+
+def _issuer_page(ticker: str, name: str) -> tuple[float | None, float | None]:
+    try:
+        shares, asof = parse_issuer_fund_page(_browser_get(ISSUER_PAGES[ticker][1]), ticker)
+        if not _fresh(asof, ticker, name):
+            return None, None
+        _LAST_ASOF[ticker] = asof
+        return shares, None
+    except Exception as e:
+        _log_error(ticker, name, e)
+        return None, None
+
+
+def _shares_from_ssga_page(ticker: str) -> tuple[float | None, float | None]:
+    return _issuer_page(ticker, "ssga_page")
+
+
+def _shares_from_kraneshares(ticker: str) -> tuple[float | None, float | None]:
+    return _issuer_page(ticker, "kraneshares")
+
+
+def _shares_from_amplify(ticker: str) -> tuple[float | None, float | None]:
+    return _issuer_page(ticker, "amplify")
+
+
+_PAGE_SOURCES = {"ssga_page": _shares_from_ssga_page, "kraneshares": _shares_from_kraneshares,
+                 "amplify": _shares_from_amplify}
+
+
 def _shares_from_stockanalysis(ticker: str) -> tuple[float | None, float | None]:
     try:
         html = _browser_get(STOCKANALYSIS_URL.format(t=ticker.lower()))
@@ -592,6 +682,8 @@ def _issuer_source_for(ticker: str):
         return _shares_from_schwab
     if ticker in ISSUER_ISHARES and ISHARES_ENABLED:
         return _shares_from_ishares
+    if ticker in ISSUER_PAGES:                      # v2.4 (N30)
+        return _PAGE_SOURCES[ISSUER_PAGES[ticker][0]]
     return None
 
 
@@ -755,6 +847,12 @@ def _snapshot_one(ticker: str) -> dict | None:
     row = {"date": row_date, "ticker": ticker,
            "shares_outstanding": float(shares), "price": float(price),
            "shares_source": used or "unknown", SESSION_COL: True}
+    # v2.4 (N30): funds moving from the relay to an issuer page also record the
+    # relay's same-day count, so the switch can be judged like for like.
+    if ticker in ISSUER_PAGES and str(used).startswith("issuer"):
+        rs, _ = _shares_from_stockanalysis(ticker)
+        if rs:
+            row["relay_shares"] = float(rs)
 
     if aum_shares and used != "aum_implied":
         divergence = abs(aum_shares - shares) / shares
@@ -899,6 +997,13 @@ MAX_SESSIONS_SINCE_UPDATE = 3   # AUM unchanged longer than this = feed frozen
 # issuer count is a genuine no-flow day.
 RELAY_PREFIX = "thirdparty"
 MAX_RELAY_FLAT_SESSIONS = 4
+# v2.4 (N30): at a fund's first issuer row, the relay's SAME-DAY count
+# (relay_shares, recorded by the poll) must be this close for the history to
+# run on unbroken. The relay prints 0.01M (±5,000 shares of rounding), hence
+# the absolute floor for small funds. With no same-day relay count the
+# series breaks: losing history is better than booking a false flow.
+RELAY_CONTINUITY_PCT = 0.005
+RELAY_CONTINUITY_SHARES = 20_000
 
 
 def _stale_aum_rows(g: pd.DataFrame) -> pd.Series:
@@ -1035,10 +1140,28 @@ def compute_flows(store: str = DEFAULT_STORE) -> pd.DataFrame:
                 first_issuer = int(is_issuer.values.argmax())
                 after = pd.Series(np.arange(len(g)) >= first_issuer)
                 informative = informative & ~(after & ~is_issuer)
+        # v2.4 (N30): issuer outranks relay; check continuity at the switch.
+        break_at = None
+        if "shares_source" in g.columns:
+            src_ = g["shares_source"].astype(str)
+            strict = src_.str.startswith("issuer")
+            if strict.any():
+                fi = int(strict.values.argmax())
+                pos = pd.Series(np.arange(len(g)))
+                informative = informative & ~((pos > fi) & ~strict)
+                rel = g.iloc[:fi][src_.iloc[:fi].str.startswith(RELAY_PREFIX)]
+                if len(rel):
+                    first_i = float(g["shares_outstanding"].iloc[fi])
+                    same = g["relay_shares"].iloc[fi] if "relay_shares" in g.columns else np.nan
+                    if pd.isna(same) or abs(first_i - float(same)) > max(RELAY_CONTINUITY_PCT * float(same),
+                                                                         RELAY_CONTINUITY_SHARES):
+                        break_at = fi
         d_shares = g["shares_outstanding"].where(informative).ffill().diff()
         d_shares = d_shares.where(informative)
         if first_issuer is not None:
             d_shares.iloc[first_issuer] = np.nan   # never diff reported vs estimated
+        if break_at is not None:
+            d_shares.iloc[:break_at + 1] = np.nan  # relay level was wrong: nothing before or at the switch counts
         g["net_flow"] = (d_shares * g["price"]).where(~g["is_split"], np.nan)
 
         g["implausible"] = (g["net_flow"].abs() / g["aum"]) > IMPLAUSIBLE_DAILY_FLOW_PCT
@@ -1408,8 +1531,10 @@ def selftest() -> dict:
             f.append(f"schwab parse wrong: {parse_schwab_page(sch, 'SCHD')}")
     except Exception as e:
         f.append(f"schwab parse raised: {e}")
-    if _issuer_source_for("SCHD") is not _shares_from_schwab or _issuer_source_for("GLD") is not None:
-        f.append("routing: SCHD -> schwab, GLD -> no issuer (third-party)")
+    if _issuer_source_for("SCHD") is not _shares_from_schwab or _issuer_source_for("GLD") is not _shares_from_ssga_page \
+            or _issuer_source_for("KMLM") is not _shares_from_kraneshares or _issuer_source_for("HACK") is not _shares_from_amplify \
+            or _issuer_source_for("SGOV") is not None:
+        f.append("routing: SCHD -> schwab, GLD -> SSGA page, KMLM -> KraneShares, HACK -> Amplify, SGOV -> relay")
     q_tp = ticker_quality(pd.DataFrame({"date": pd.to_datetime(dates[:6]), "ticker": "T",
                                         "shares_outstanding": [1e6, 1e6, 1.01e6, 1.01e6, 1.02e6, 1.02e6],
                                         "price": px[:6], "shares_source": "thirdparty_stockanalysis"}))
@@ -1499,6 +1624,18 @@ def selftest() -> dict:
         _row = _snapshot_one("TST")
         if not _row or _row["date"] != "2001-01-02" or not _is_true(_row.get(SESSION_COL)):
             f.append(f"a relay snapshot must be dated by session_for() and marked session-dated: {_row}")
+        def _fake_issuer(t):
+            _LAST_ASOF[t] = "2001-01-02"
+            return 19_400_002.0, 30.0
+        _fake_issuer.__name__ = "_shares_from_kraneshares"
+        _g["_issuer_source_for"] = lambda t: _fake_issuer if t == "KMLM" else None
+        _g["_shares_from_stockanalysis"] = lambda t: (19.40e6, None)
+        _rk = _snapshot_one("KMLM")
+        if not _rk or _rk["shares_source"] != "issuer_kraneshares" or _rk.get("relay_shares") != 19.40e6:
+            f.append(f"an issuer-page fund's snapshot must record the relay's same-day count: {_rk}")
+        _rt = _snapshot_one("TST")
+        if _rt and "relay_shares" in _rt:
+            f.append("a relay-only fund must not get a relay_shares cross-check column")
     finally:
         _g.update(_saved)
     if session_of_date("2026-10-31") != "2026-10-30" or session_of_date("2026-11-02") != "2026-11-02" \
@@ -1600,6 +1737,80 @@ def selftest() -> dict:
         want8 = float(g8["net_flow"].iloc[-5:].sum()) / float(g8["aum"].iloc[-6]) * 100
         if abs(r8["net_flow_pct_aum"] - round(want8, 2)) > 0.011:
             f.append(f"divergence % of AUM must use start-of-window AUM: {r8['net_flow_pct_aum']} vs {want8:.2f}")
+    # v2.4 (N30): issuer pages, parsed from text copied from the real pages (Issuer Probe 2026-11-01)
+    gld = ("<html><head><title>GLD: SPDR&reg; Gold Shares</title></head><body>Fund Net Asset Value as of Oct 30 2026 "
+           "LBMA Gold Price PM $4,026.30 NAV NAV The market value of a mutual fund&#39;s or ETFs total assets, minus "
+           "liabilities, divided by the number of shares outstanding. $358.64 Shares Outstanding 365.30 M Assets Under "
+           "Management $131,009.64 M Most Recent NAV</body></html>")
+    kml = ("<html><head><title>Managed Futures ETF | KMLM | KraneShares Mount Lucas Strategy</title></head><body>Fund "
+           "Details Data as of 10/30/2026 Ticker KMLM Primary Exchange NYSE CUSIP 500767652 ISIN US5007676522 Net Assets "
+           "$595,566,843 Shares Outstanding 19,400,002 Total Annual Fund Operating Expense 0.90%</body></html>")
+    hck = ("<html><head><title>HACK - Amplify ETFs</title></head><body>Key Information Data as of 10/30/2026 Fund "
+           "Details Ticker HACK Launch Date 11/11/2014 Primary Exchange NYSE Arca CUSIP 032108664 Net Assets "
+           "$3,552,232,254 Shares Outstanding 28,500,000 Holdings (view all holdings) 23</body></html>")
+    for html_, tk_, want in ((gld, "GLD", (365_300_000, "2026-10-30")), (kml, "KMLM", (19_400_002, "2026-10-30")),
+                             (hck, "HACK", (28_500_000, "2026-10-30"))):
+        try:
+            got = parse_issuer_fund_page(html_, tk_)
+            if abs(got[0] - want[0]) > 0.5 or got[1] != want[1]:
+                f.append(f"parse_issuer_fund_page {tk_}: {got} != {want}")
+        except Exception as e:
+            f.append(f"parse_issuer_fund_page {tk_} raised: {e}")
+    for bad_, why in ((gld.replace("GLD:", "IAU:"), "another fund's page"),
+                      (kml.replace("Shares Outstanding 19,400,002", "Shares Outstanding"), "a JavaScript-filled (empty) count"),
+                      (hck.replace("Data as of 10/30/2026", "Key data"), "no as-of date")):
+        try:
+            parse_issuer_fund_page(bad_, "GLD" if "IAU" in bad_ else ("KMLM" if "KMLM" in bad_ else "HACK"))
+            f.append(f"parse_issuer_fund_page must refuse {why}")
+        except ValueError:
+            pass
+    try:                                    # the NAV-definition prose must never be read as the count
+        if parse_issuer_fund_page(gld, "GLD")[0] < 1e8:
+            f.append("the count must be the figure right after the label, not the NAV prose")
+    except Exception:
+        pass
+    # switchover: relay -> issuer. GLD-like (relay frozen 352.4M, issuer 365.3M) breaks; KMLM-like continues.
+    def _sw(tk, relay_vals, issuer_vals):
+        rows_ = [{"date": d.date().isoformat(), "ticker": tk, "shares_outstanding": v, "price": 100.0,
+                  "shares_source": "thirdparty_stockanalysis", SESSION_COL: True} for d, v in zip(dates[:len(relay_vals)], relay_vals)]
+        rows_ += [{"date": d.date().isoformat(), "ticker": tk, "shares_outstanding": v, "price": 100.0,
+                   "shares_source": "issuer_ssga_page", SESSION_COL: True}
+                  for d, v in zip(dates[len(relay_vals):len(relay_vals) + len(issuer_vals)], issuer_vals)]
+        return rows_
+    def _same(rows_, tk, val):              # the poll's same-day relay count on the first issuer row
+        for r_ in rows_:
+            if r_["ticker"] == tk and r_["shares_source"].startswith("issuer"):
+                r_["relay_shares"] = val
+                break
+        return rows_
+    s9 = os.path.join(tempfile.mkdtemp(), "h.csv")
+    # CONT: the issuer's first count is a normal day's creation above the relay's PREVIOUS count (+0.8%),
+    # but matches the relay's same-day count -> runs on. FROZ: same-day relay still frozen -> breaks.
+    cont = _same(_sw("CONT", [19.30e6, 19.35e6, 19.24e6], [19_400_002, 19_500_002, 19_450_002]), "CONT", 19.40e6)
+    for r_ in cont[4:]:                      # issuer rows on sessions 3, 5, 6 ...
+        r_["date"] = dates[dates.get_loc(pd.Timestamp(r_["date"])) + 1].date().isoformat()
+    cont.append({"date": dates[4].date().isoformat(), "ticker": "CONT", "shares_outstanding": 99e6,   # ... relay fallback on 4
+                 "price": 100.0, "shares_source": "thirdparty_stockanalysis", SESSION_COL: True})
+    rows9 = (_same(_sw("FROZ", [350e6, 352.4e6, 352.4e6, 352.4e6], [365.3e6, 366.0e6, 367.0e6]), "FROZ", 352.4e6)
+             + _sw("NOREL", [5.00e6, 5.01e6], [5.02e6, 5.03e6]) + cont)
+    pd.DataFrame(rows9).to_csv(s9, index=False)
+    f9 = compute_flows(s9)
+    fz, ct = f9[f9["ticker"] == "FROZ"].reset_index(drop=True), f9[f9["ticker"] == "CONT"]
+    if fz["net_flow"].iloc[:5].notna().any() or abs(float(fz["net_flow"].iloc[5]) - 0.7e6 * 100) > 1e-3:
+        f.append(f"a relay that disagrees with the issuer must break: no flow before or at the switch, then issuer "
+                 f"changes only: {fz['net_flow'].tolist()}")
+    ct_issuer = ct[ct["shares_source"].str.startswith("issuer")]
+    nr = f9[f9["ticker"] == "NOREL"].reset_index(drop=True)
+    if nr["net_flow"].iloc[:3].notna().any() or abs(float(nr["net_flow"].iloc[3]) - 0.01e6 * 100) > 1e-3:
+        f.append(f"with no same-day relay count the switch must break (never book a flow across it): {nr['net_flow'].tolist()}")
+    if abs(float(ct["net_flow"].sum(skipna=True)) - (19_450_002 - 19.30e6) * 100) > 1e-3:
+        f.append(f"a relay that continues into the issuer must run on unbroken (net = total share change): "
+                 f"{ct['net_flow'].tolist()}")
+    if ct.loc[ct["shares_source"].str.startswith(RELAY_PREFIX) & (pd.to_datetime(ct["date"]) > pd.to_datetime(ct_issuer["date"].min())),
+              "net_flow"].notna().any():
+        f.append("a relay row after the first issuer row must carry no flow (the 99M fallback print is ignored)")
+    if not (ct["shares_outstanding"] == 99e6).any():
+        f.append("the fallback relay row must be present in the test (else the check above proves nothing)")
     return {"ok": not f, "failures": f,
             "quality": {k: (x["trustworthy"], x["aum_update_rate"], x["price_mirror_corr"]) for k, x in q.items()}}
 
