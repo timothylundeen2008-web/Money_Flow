@@ -1,6 +1,11 @@
 """
-publish_to_checklist.py  (v1.1 — October 2026)
+publish_to_checklist.py  (v1.2 — November 2026)
 ──────────────────────────────────────────────────────────────────────────────
+v1.2 (2026-11-01): after publishing flow_map_summary.json, appends that
+  session's verdict record to flow_map_history.csv (flow_map.append_history):
+  readings, typical day, borderline, state, hedge sensitivity. It is the
+  as-published record future rules are tested against. A failure is logged
+  and never blocks the summary or the main publish.
 v1.1 (2026-10-31): also publishes flow_map_summary.json (flow_map.bridge_summary:
   20-session net ETF flows by theme and asset class, with a verdict) for the
   Portfolio-Tracker brief's "Where the money went" section. A failure there is
@@ -119,8 +124,23 @@ def main() -> int:
     fms = _safe("flow_map summary", _flow_map_summary)
     if fms:
         s, res = fms
+        v = s["verdict"]
         print(f"[publish] flow_map summary: {s['coverage']['measured']} of {s['coverage']['total']} funds measured; "
-              f"verdict {s['verdict']['kind']}; durable={res.get('durable', False)}")
+              f"verdict {v['kind']}; state {v.get('state')}; durable={res.get('durable', False)}")
+
+        # v1.2: the as-published record, one row per session
+        def _flow_map_history():
+            import flow_map
+            from storage_backend import read_df, write_df
+            h = flow_map.append_history(read_df(flow_map.HISTORY_FILE), v.get("record"))
+            r = write_df(flow_map.HISTORY_FILE, h,
+                         message=f"flow map: history ({datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC)")
+            return len(h), r
+        fmh = _safe("flow_map history", _flow_map_history) if v.get("record") else None
+        if fmh:
+            print(f"[publish] flow_map history: {fmh[0]} sessions logged; durable={fmh[1].get('durable', False)}")
+        elif not v.get("record"):
+            print("[publish] flow_map history: no record today (verdict unavailable) — nothing logged")
 
     schema = _safe("COT schema check", verify_schema) or {}
     schema_ok = bool(schema) and all(v.get("ok") for v in schema.values())

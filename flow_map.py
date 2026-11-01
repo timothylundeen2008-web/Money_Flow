@@ -1,6 +1,21 @@
 """
-flow_map.py  (v1.1 — October 2026)
+flow_map.py  (v1.2 — November 2026)
 ──────────────────────────────────
+v1.2 (2026-11-01): the stocks-vs-safety verdict is built for accuracy.
+  * Thin classes (under half their funds measured) are shown but left out of
+    the verdict; the evidence says what the reading would be with them.
+  * BORDERLINE: a reading within one typical day of the ±0.25% line is
+    labelled borderline, not stated as a signal. A typical day is one standard
+    deviation of the reading's daily change over the last 20 sessions, each
+    recomputed as of that day (reading_history, no hindsight).
+  * Sensitivity: the stock reading without the hedging vehicles, flagged when
+    it disagrees.
+  * recommended_steps(): what the model portfolio and swing book do with the
+    reading, restating checklist v4 Step 5 and the swing confluence rule, with
+    the exact readings (and dollars) that would resolve a borderline call.
+  * A machine-readable record per session (append_history ->
+    flow_map_history.csv via publish_to_checklist) so future rules can be
+    tested on what was actually published.
 v1.1 (2026-10-31): asset-class roll-up (ASSET_CLASS: US equity, international,
   Treasuries, credit, cash-like, gold & commodities, alternatives), a rule-based
   verdict on whether money left stocks and where it went (money_verdict), and
@@ -44,6 +59,7 @@ GROUPS
 """
 from __future__ import annotations
 
+import json
 import math
 from typing import Optional
 
@@ -235,6 +251,11 @@ STOCK_CLASSES = ("US equity", "International equity")
 SAFE_CLASSES = ("Treasuries", "Cash-like")
 MATERIAL_PCT = 0.25     # a bucket's net flow must be at least this % of its measured assets to count as in/out
 SUMMARY_FILE = "flow_map_summary.json"
+HISTORY_FILE = "flow_map_history.csv"   # v1.2: one row per session, as published (for testing future rules)
+HISTORY_COLUMNS = ["date", "published_at", "measured", "total", "stocks_pct", "stocks_all_pct",
+                   "stocks_ex_hedge_pct", "safety_pct", "stocks_flow_usd", "safety_flow_usd", "typical_day",
+                   "line", "distance_pts", "margin_days", "kind", "borderline", "state", "sessions_in_state",
+                   "prev_state", "thin_classes", "hedge_agrees"]
 THIN_COVERAGE = 0.5     # fewer than half a class's funds measured → its reading is flagged thin (indicative only)
 
 
@@ -262,67 +283,267 @@ def asset_class_flows(funds: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=cols)
 
 
-def _side(classes: pd.DataFrame, names) -> tuple:
+def _side(classes: pd.DataFrame, names, drop_thin: bool = True) -> tuple:
+    """Net flow, % of measured assets and direction for a set of classes.
+    v1.2: thin classes (under half their funds measured) are left out of the
+    verdict math by default; they stay in the table, marked thin."""
     sub = classes[classes["asset_class"].isin(names) & (classes["measured"] > 0)]
+    if drop_thin and "thin" in sub.columns:
+        sub = sub[~sub["thin"].astype(bool)]
     flow, aum = float(sub["flow_usd"].sum()), float(sub["aum"].sum())
     pct = flow / aum * 100 if aum else None
-    d = "n/a" if pct is None else "in" if pct >= MATERIAL_PCT else "out" if pct <= -MATERIAL_PCT else "flat"
-    return flow, pct, d
+    return flow, pct, _dir(pct)
 
 
-def money_verdict(classes: pd.DataFrame, groups: pd.DataFrame, funds: pd.DataFrame, window: int) -> dict:
-    """Verdict / evidence / rule / what would change it, from the class table."""
-    s_flow, s_pct, s_dir = _side(classes, STOCK_CLASSES)
-    f_flow, f_pct, f_dir = _side(classes, SAFE_CLASSES)
+def _dir(pct) -> str:
+    if pct is None:
+        return "n/a"
+    return "in" if pct >= MATERIAL_PCT else "out" if pct <= -MATERIAL_PCT else "flat"
+
+
+def _kind(s_dir: str, f_dir: str) -> str:
+    if s_dir == "n/a" or f_dir == "n/a":
+        return "unavailable"
+    if s_dir == "out" and f_dir == "in":
+        return "out_of_stocks"
+    if s_dir == "in" and f_dir == "out":
+        return "into_stocks"
+    if s_dir == "in":
+        return "new_money"
+    if s_dir == "out":
+        return "leaving_both"
+    return "stocks_flat"
+
+
+# v1.2 — how sure is the call? The line is ±MATERIAL_PCT. How far a reading
+# sits from it is measured in TYPICAL DAYS: one standard deviation of the
+# reading's own day-to-day change over the last NOISE_LOOKBACK sessions, each
+# day recomputed as of that day (no hindsight). Within FLOW_BORDER_DAYS of the
+# nearest line, one ordinary day could flip the call, so it is labelled
+# borderline instead of being stated as a signal. Same idea as section 1A's
+# "distance to stress in typical days".
+NOISE_LOOKBACK = 20
+MIN_NOISE_OBS = 10
+FLOW_BORDER_DAYS = 1.0
+STOCK_PROXY, SAFETY_PROXY = "SPY", "SGOV"     # what a firm call is scored on (Portfolio-Tracker signal_outcomes)
+
+
+def stock_readings(funds: pd.DataFrame) -> dict:
+    """The verdict's inputs for one window: stocks and safety readings (thin
+    classes excluded), stocks with thin classes included, and stocks without
+    the hedging vehicles (sensitivity only)."""
+    cl = asset_class_flows(funds)
+    s_flow, s_pct, s_dir = _side(cl, STOCK_CLASSES)
+    f_flow, f_pct, f_dir = _side(cl, SAFE_CLASSES)
+    _, s_all, _ = _side(cl, STOCK_CLASSES, drop_thin=False)
+    ok_classes = set(cl.loc[(~cl["thin"].astype(bool)) & cl["asset_class"].isin(STOCK_CLASSES), "asset_class"])
+    stock_t = {t for g, c in ASSET_CLASS.items() if c in ok_classes for t in GROUPS[g][1]}
+    m = funds[funds["ticker"].isin(stock_t - HEDGE_VEHICLES) & funds["measurable"].astype(bool)] \
+        if not funds.empty else funds
+    a = float(m["aum_start"].sum()) if not m.empty else 0.0
+    s_xh = float(m["flow_usd"].sum()) / a * 100 if a else None
+    return {"classes": cl, "stocks_flow": s_flow, "stocks": s_pct, "stocks_dir": s_dir,
+            "safety_flow": f_flow, "safety": f_pct, "safety_dir": f_dir, "stocks_all": s_all,
+            "stocks_ex_hedge": s_xh, "stocks_aum": float(cl.loc[cl["asset_class"].isin(ok_classes), "aum"].sum()),
+            "thin": sorted(cl.loc[cl["thin"].astype(bool), "asset_class"]), "kind": _kind(s_dir, f_dir)}
+
+
+def reading_history(flows: pd.DataFrame, window: int = DEFAULT_WINDOW, quality_fn=None,
+                    n: int = NOISE_LOOKBACK + 1) -> list:
+    """Stocks/safety readings as of each of the last `n` sessions, each built
+    only from data up to that session (point in time)."""
+    if flows is None or flows.empty:
+        return []
+    f = flows.copy()
+    f["date"] = pd.to_datetime(f["date"])
+    out = []
+    for d in sorted(f["date"].unique())[-n:]:
+        r = stock_readings(fund_flows(f[f["date"] <= d], window, quality_fn))
+        out.append({"date": str(pd.Timestamp(d).date()), "stocks": r["stocks"], "safety": r["safety"],
+                    "stocks_all": r["stocks_all"], "stocks_ex_hedge": r["stocks_ex_hedge"], "kind": r["kind"]})
+    return out
+
+
+def typical_day(history: list, key: str = "stocks") -> Optional[float]:
+    vals = [h.get(key) for h in history or []]
+    diffs = [b - a for a, b in zip(vals, vals[1:]) if a is not None and b is not None]
+    if len(diffs) < MIN_NOISE_OBS:
+        return None
+    sd = float(np.std(diffs, ddof=1))
+    return sd if sd > 1e-9 else None          # no variation = no measure of noise, not zero noise
+
+
+def _margin(pct, sd):
+    """(nearest line, distance in points, distance in typical days)."""
+    if pct is None:
+        return None, None, None
+    line = MATERIAL_PCT if abs(pct - MATERIAL_PCT) <= abs(pct + MATERIAL_PCT) else -MATERIAL_PCT
+    dist = abs(pct - line)
+    return line, dist, (dist / sd if sd else None)
+
+
+def _state(kind: str, borderline) -> str:
+    return "borderline" if borderline else kind
+
+
+def recommended_steps(state: str, kind: str, r: dict, sd, sessions: int, missing: list) -> list:
+    """What the model portfolio and the swing book should do with this reading.
+    Every step restates an existing rule (checklist v4 Step 5; swing procedure
+    Part 4); none adds a new trading rule."""
+    usd = lambda pct_pts: fmt_usd(r["stocks_aum"] * pct_pts / 100) if r.get("stocks_aum") else "n/a"
+    s = r["stocks"]
+    steps = []
+    if state == "unavailable":
+        return ["Level 2 is BLOCKED, not neutral: too few measured funds to compare stocks with safe assets. "
+                "Do not use market-wide flow to confirm or deny anything until coverage returns."]
+    if state == "borderline":
+        steps.append("Model portfolio: treat Level 2 as unconfirmed. Hold the regime's weights; make no add or "
+                     "cut justified by market-wide flow (checklist v4 Step 5: flow never overrides the regime).")
+        steps.append("Swing book: market-wide flow cannot serve as the Tier A confirmation leg today. Score each "
+                     "candidate's Tier A leg on its own fund's creations.")
+        if sd and s is not None:
+            up, dn = MATERIAL_PCT + sd, -MATERIAL_PCT - sd
+            msg = (f"Resolves when the stock reading closes above {up:+.2f}% (firm in: about {usd(up - s)} more "
+                   f"net creations) or below {dn:+.2f}% (firm out: about {usd(dn - s)}); today {s:+.2f}%. ")
+            if sd < MATERIAL_PCT:
+                msg += (f"A firm 'no move' needs the reading inside {-(MATERIAL_PCT - sd):+.2f}% to "
+                        f"{MATERIAL_PCT - sd:+.2f}%.")
+            else:
+                msg += (f"With a typical day ({sd:.2f}) wider than half the gap between the lines, no reading "
+                        f"counts as a firm 'no move'.")
+            steps.append(msg)
+        steps.append(f"Re-check after the next poll ({sessions} session{'s' if sessions != 1 else ''} at "
+                     f"borderline so far). Log the day's reading; do not act on it.")
+    elif kind in ("new_money", "into_stocks"):
+        steps.append("Model portfolio: flow confirms money entering stocks. That confirms a risk-on regime tilt; "
+                     "it never raises equity weights on its own (flow does not override the regime).")
+        steps.append("Swing book: supports long candidates whose own fund shows creations. Each Tier A leg is "
+                     "still scored per ticker.")
+        if sd and s is not None:
+            steps.append(f"Invalidated when the stock reading falls below {MATERIAL_PCT + sd:+.2f}% "
+                         f"(back to borderline); today {s:+.2f}%.")
+    elif kind == "out_of_stocks":
+        steps.append("Model portfolio: money is leaving stocks for Treasuries and cash. Under a risk-on regime "
+                     "this is a contradiction to log and watch, not a cut (Step 5). Cross-check section 1A's "
+                     "distance to stress and the credit lane.")
+        steps.append("Swing book: no long is justified by market-wide flow; per-ticker Tier A legs still decide; "
+                     "size by the regime multiple.")
+        if sd and s is not None:
+            steps.append(f"Invalidated when the stock reading rises above {-MATERIAL_PCT - sd:+.2f}%; "
+                         f"today {s:+.2f}%.")
+    elif kind == "leaving_both":
+        steps.append("Money left stocks without arriving in measured Treasury or cash funds. Check the credit lane "
+                     "and the excluded funds before reading this as de-risking; money-market funds are not "
+                     "measured here.")
+        steps.append("Swing book: no long is justified by market-wide flow; per-ticker legs still decide.")
+    else:  # stocks_flat, firm
+        steps.append("No market-wide flow signal. Regime weights stand; use per-ticker Tier A flow only.")
+    if r.get("stocks_ex_hedge") is not None and _dir(r["stocks_ex_hedge"]) != r["stocks_dir"]:
+        steps.append(f"Lower confidence: without the hedging vehicles the stock reading is "
+                     f"{r['stocks_ex_hedge']:+.2f}% ({_dir(r['stocks_ex_hedge'])}), against {s:+.2f}% "
+                     f"({r['stocks_dir']}) with them. Their share counts also move with short selling.")
+    if missing:
+        steps.append("Readmission would change the reading: not measured in stocks or safety: "
+                     + ", ".join(missing) + ".")
+    return steps
+
+
+def money_verdict(classes: pd.DataFrame, groups: pd.DataFrame, funds: pd.DataFrame, window: int,
+                  history: Optional[list] = None) -> dict:
+    """Verdict / evidence / rule / what would change it, plus (v1.2) how sure
+    the call is, recommended steps, and a machine-readable record."""
+    r = stock_readings(funds) if not funds.empty else {
+        "classes": classes, "stocks_flow": 0.0, "stocks": None, "stocks_dir": "n/a", "safety_flow": 0.0,
+        "safety": None, "safety_dir": "n/a", "stocks_all": None, "stocks_ex_hedge": None, "stocks_aum": 0.0,
+        "thin": [], "kind": "unavailable"}
+    kind = r["kind"]
+    s_flow, s_pct, f_flow, f_pct = r["stocks_flow"], r["stocks"], r["safety_flow"], r["safety"]
+    sd = typical_day(history) if history else None
+    line, dist, mdays = _margin(s_pct, sd)
+    borderline = None if mdays is None or kind == "unavailable" else bool(mdays < FLOW_BORDER_DAYS)
+    state = _state(kind, borderline)
+    states = []
+    for h in history or []:
+        _, _, md = _margin(h.get("stocks"), sd)
+        states.append(_state(h.get("kind"), None if md is None else md < FLOW_BORDER_DAYS))
+    if states:
+        states[-1] = state
+    run = 0
+    for st_ in reversed(states):
+        if st_ != state:
+            break
+        run += 1
+    prev = states[-2] if len(states) >= 2 else None
     rule = (f"Net {window}-session ETF creations minus redemptions, from trusted share counts only "
             f"(integrity test passed and at least {MIN_COVERAGE:.0%} of sessions measured). A bucket counts as "
             f"in or out when its net flow is at least {MATERIAL_PCT}% of its measured assets. Stocks = US + "
-            f"international equity; safety = Treasuries + cash-like. ETF data shows where money left and where "
-            f"it arrived, not which dollar went where.")
-    if s_dir == "n/a" or f_dir == "n/a":
-        return {"kind": "unavailable", "verdict": "Not enough measured funds to compare stocks with safe assets",
-                "evidence": [], "rule": rule, "changes_if": "More funds passing the integrity test."}
+            f"international equity; safety = Treasuries + cash-like; a class with under "
+            f"{THIN_COVERAGE:.0%} of its funds measured is shown but left out of the verdict. A reading within "
+            f"{FLOW_BORDER_DAYS:.0f} typical day of the ±{MATERIAL_PCT}% line is borderline (a typical day = one "
+            f"standard deviation of the reading's daily change over the last {NOISE_LOOKBACK} sessions, each "
+            f"recomputed as of that day). ETF data shows where money left and where it arrived, not which dollar "
+            f"went where.")
+    if kind == "unavailable":
+        return {"kind": kind, "verdict": "Not enough measured funds to compare stocks with safe assets",
+                "evidence": [], "rule": rule, "changes_if": "More funds passing the integrity test.",
+                "borderline": None, "state": "unavailable",
+                "steps": recommended_steps("unavailable", kind, r, sd, 0, []),
+                "record": None}
     s_txt = f"stocks {fmt_usd(s_flow)} ({s_pct:+.2f}% of measured assets)"
     f_txt = f"Treasuries + cash {fmt_usd(f_flow)} ({f_pct:+.2f}%)"
-    if s_dir == "out" and f_dir == "in":
-        kind = "out_of_stocks"
+    if kind == "out_of_stocks":
         share = f_flow / abs(s_flow) if s_flow else 0
-        verdict = (f"Money left stocks for safety: {s_txt}; {f_txt}, about {share:.0%} of the stock outflow")
+        verdict = f"Money left stocks for safety: {s_txt}; {f_txt}, about {share:.0%} of the stock outflow"
         changes = "Stock funds turning net positive, or safe assets turning net negative."
-    elif s_dir == "in" and f_dir == "out":
-        kind = "into_stocks"
+    elif kind == "into_stocks":
         verdict = f"Money moved from safety into stocks: {s_txt}; {f_txt}"
         changes = "Stock funds turning net negative while safe assets take money in."
-    elif s_dir == "in" and f_dir in ("in", "flat"):
-        kind = "new_money"
-        verdict = (f"New money, not a move out of stocks: {s_txt}; {f_txt}")
+    elif kind == "new_money":
+        verdict = f"New money, not a move out of stocks: {s_txt}; {f_txt}"
         changes = f"Stock funds net outflow of {MATERIAL_PCT}% or more of their assets."
-    elif s_dir == "out" and f_dir in ("out", "flat"):
-        kind = "leaving_both"
+    elif kind == "leaving_both":
         verdict = (f"Money left stocks without arriving in Treasuries or cash funds: {s_txt}; {f_txt} — "
                    f"it went to funds not measured here, or out of ETFs altogether")
         changes = "Treasuries or cash-like funds taking money in."
     else:
-        kind = "stocks_flat"
         verdict = f"No material net move in stocks: {s_txt}; {f_txt}"
         changes = f"Stock funds net flow of ±{MATERIAL_PCT}% or more of their assets."
+    if borderline:
+        verdict = (f"Borderline — {verdict[0].lower()}{verdict[1:]}. The stock reading is {dist:.2f} points from "
+                   f"the {line:+.2f}% line, under one typical day ({sd:.2f}): not a signal")
     ev = []
-    for r in classes.itertuples():
-        if r.measured == 0:
-            ev.append(f"{r.asset_class}: no measured fund ({r.total} tracked)")
+    for row in classes.itertuples():
+        if row.measured == 0:
+            ev.append(f"{row.asset_class}: no measured fund ({row.total} tracked)")
             continue
-        gap = f"; not measured: {', '.join(r.missing)}" if r.missing else ""
+        gap = f"; not measured: {', '.join(row.missing)}" if row.missing else ""
         thin = (f" — THIN: under half its funds measured, so this reading rests on "
-                f"{'one fund' if r.measured == 1 else f'{r.measured} funds'} and is indicative only") if r.thin else ""
-        ev.append(f"{r.asset_class}: {fmt_usd(r.flow_usd)} ({r.pct_aum:+.2f}%, {r.direction}) — "
-                  f"{r.measured} of {r.total} funds{gap}{thin}")
+                f"{'one fund' if row.measured == 1 else f'{row.measured} funds'}, is indicative only, and is "
+                f"left out of the verdict") if row.thin else ""
+        ev.append(f"{row.asset_class}: {fmt_usd(row.flow_usd)} ({row.pct_aum:+.2f}%, {row.direction}) — "
+                  f"{row.measured} of {row.total} funds{gap}{thin}")
+    if r["thin"] and r["stocks_all"] is not None and r["stocks_all"] != s_pct:
+        ev.append(f"With the thin class{'es' if len(r['thin']) > 1 else ''} included the stock reading would be "
+                  f"{r['stocks_all']:+.2f}% ({_dir(r['stocks_all'])})")
+    if r["stocks_ex_hedge"] is not None:
+        ev.append(f"Sensitivity: stocks without the hedging vehicles ({', '.join(sorted(HEDGE_VEHICLES & set(funds['ticker'])))}) "
+                  f"{r['stocks_ex_hedge']:+.2f}% ({_dir(r['stocks_ex_hedge'])})"
+                  + (" — agrees" if _dir(r["stocks_ex_hedge"]) == r["stocks_dir"] else " — DISAGREES"))
+    if sd is not None:
+        tail = [h for h in history if h.get("stocks") is not None][-5:]
+        ev.append(f"Stock reading, last {len(tail)} sessions: "
+                  + ", ".join(f"{h['date'][5:]} {h['stocks']:+.2f}%" for h in tail)
+                  + f"; typical day {sd:.2f} points; {mdays:.1f} typical days from the line")
+    else:
+        ev.append(f"Typical day not measurable (needs {MIN_NOISE_OBS} daily changes with some variation); "
+                  f"borderline test skipped")
     eq = groups[groups["group"].map(lambda g: ASSET_CLASS.get(g) in STOCK_CLASSES)] if not groups.empty else groups
     if not eq.empty:
         outs = eq[eq["flow_usd"] < 0].sort_values("flow_usd").head(2)
         ins = eq[eq["flow_usd"] > 0].sort_values("flow_usd", ascending=False).head(3)
         if len(outs) and len(ins):
-            ev.append("Within stocks: out of " + ", ".join(f"{r.group} ({fmt_usd(r.flow_usd)})" for r in outs.itertuples())
-                      + "; into " + ", ".join(f"{r.group} ({fmt_usd(r.flow_usd)})" for r in ins.itertuples()))
+            ev.append("Within stocks: out of " + ", ".join(f"{g.group} ({fmt_usd(g.flow_usd)})" for g in outs.itertuples())
+                      + "; into " + ", ".join(f"{g.group} ({fmt_usd(g.flow_usd)})" for g in ins.itertuples()))
     if not funds.empty:
         big = funds[funds["measurable"].astype(bool)].copy()
         big["abs"] = big["flow_usd"].abs()
@@ -331,7 +552,37 @@ def money_verdict(classes: pd.DataFrame, groups: pd.DataFrame, funds: pd.DataFra
             ev.append(f"† {', '.join(hv)} {'is' if len(hv) == 1 else 'are'} among the largest moves and "
                       f"{'is a' if len(hv) == 1 else 'are'} hedging vehicle{'s' if len(hv) > 1 else ''}: share counts "
                       f"also move with short selling and market-maker hedging, not only investor money")
-    return {"kind": kind, "verdict": verdict, "evidence": ev, "rule": rule, "changes_if": changes}
+    missing = sorted({t for row in classes.itertuples()
+                      if row.asset_class in STOCK_CLASSES + SAFE_CLASSES for t in row.missing})
+    steps = recommended_steps(state, kind, r, sd, run, missing)
+    if borderline:
+        changes = (f"The stock reading moving more than one typical day ({sd:.2f} points) past the "
+                   f"{line:+.2f}% line.")
+    record = {"stocks_pct": s_pct, "stocks_all_pct": r["stocks_all"], "stocks_ex_hedge_pct": r["stocks_ex_hedge"],
+              "safety_pct": f_pct, "stocks_flow_usd": s_flow, "safety_flow_usd": f_flow,
+              "typical_day": sd, "line": line, "distance_pts": dist, "margin_days": mdays,
+              "kind": kind, "borderline": borderline, "state": state, "sessions_in_state": run,
+              "prev_state": prev, "thin_classes": "; ".join(r["thin"]),
+              "hedge_agrees": None if r["stocks_ex_hedge"] is None else _dir(r["stocks_ex_hedge"]) == r["stocks_dir"]}
+    return {"kind": kind, "verdict": verdict, "evidence": ev, "rule": rule, "changes_if": changes,
+            "borderline": borderline, "state": state, "sessions_in_state": run, "prev_state": prev,
+            "steps": steps, "record": record,
+            "history": [{k: h[k] for k in ("date", "stocks", "safety", "kind")} for h in (history or [])]}
+
+
+def append_history(hist: Optional[pd.DataFrame], record: Optional[dict]) -> pd.DataFrame:
+    """One row per session in HISTORY_FILE. A re-publish for the same session
+    replaces that session's row (the latest publish is what the brief showed);
+    every other row is kept exactly as first written, so the file is the
+    as-published record, never a recomputation."""
+    hist = hist if hist is not None and not hist.empty else pd.DataFrame(columns=HISTORY_COLUMNS)
+    if not record or not record.get("date"):
+        return hist
+    row = pd.DataFrame([{c: record.get(c) for c in HISTORY_COLUMNS}])
+    keep = hist[hist["date"].astype(str) != str(record["date"])] if "date" in hist.columns else hist
+    out = pd.concat([keep, row], ignore_index=True)
+    out = out.reindex(columns=list(dict.fromkeys(HISTORY_COLUMNS + list(out.columns))))
+    return out.sort_values("date").reset_index(drop=True)
 
 
 def bridge_summary(flows: pd.DataFrame, window: int = DEFAULT_WINDOW, quality_fn=None,
@@ -341,13 +592,21 @@ def bridge_summary(flows: pd.DataFrame, window: int = DEFAULT_WINDOW, quality_fn
     m = build(flows, window, quality_fn)
     funds, groups = m["funds"], m["groups"]
     classes = asset_class_flows(funds)
-    v = money_verdict(classes, groups, funds, window)
+    hist = reading_history(flows, window, quality_fn)
+    v = money_verdict(classes, groups, funds, window, hist)
     clean = lambda x: None if x is None or (isinstance(x, float) and math.isnan(x)) else x
+    v = json.loads(json.dumps(v, default=lambda o: o.item() if hasattr(o, "item") else str(o)),
+                   parse_constant=lambda c: None)
     last = str(pd.to_datetime(flows["date"]).max().date()) if flows is not None and not flows.empty else None
+    cov = {"measured": int(funds["measurable"].sum()) if not funds.empty else 0, "total": len(funds)}
+    published = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if v.get("record"):
+        v["record"] = {"date": last, "published_at": published, "measured": cov["measured"],
+                       "total": cov["total"], **v["record"]}
     return {
-        "published_at": now or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "published_at": published,
         "window": window, "data_through": last,
-        "coverage": {"measured": int(funds["measurable"].sum()) if not funds.empty else 0, "total": len(funds)},
+        "coverage": cov,
         "asset_classes": [{k: (clean(r[k]) if k != "missing" else r[k]) for k in classes.columns}
                           for _, r in classes.iterrows()],
         "themes": [{"group": r.group, "asset_class": ASSET_CLASS.get(r.group), "risk": r.risk,
@@ -580,11 +839,16 @@ def selftest() -> dict:
     def fl(tk, per_day, aum=1e9):
         return series(tk, [np.nan] + [per_day] * 69, aum=aum)
 
-    def verdict_for(parts):
+    def verdict_for(parts, fill=True, history=None, skip=()):
+        # v1.2: every other tracked fund present with zero flow and negligible
+        # assets, so no class is thin unless a test means it to be
+        have = {p_["ticker"].iloc[0] for p_ in parts}
+        if fill:
+            parts = parts + [fl(t, 0.0, aum=1.0) for t in TICKER_GROUP if t not in have and t not in skip]
         d = pd.concat(parts, ignore_index=True)
         mm = build(d, 20, ok_q)
         cl = asset_class_flows(mm["funds"])
-        return cl, money_verdict(cl, mm["groups"], mm["funds"], 20)
+        return cl, money_verdict(cl, mm["groups"], mm["funds"], 20, history)
     # stocks out 20 x -1M on 1B = -2%; Treasuries in +1%: out of stocks into safety
     cl, v = verdict_for([fl("SPY", -1e6), fl("TLT", 0.5e6), fl("SGOV", 0.1e6)])
     if v["kind"] != "out_of_stocks":
@@ -620,7 +884,8 @@ def selftest() -> dict:
     if verdict_for([fl("XLK", -1e6), fl("HYG", 1e6), fl("TLT", 0.0)])[1]["kind"] != "leaving_both":
         f.append("stocks out + credit in (Treasuries flat) must read leaving_both — credit is not a safe asset")
     # a class with under half its funds measured is flagged thin, in the table and the evidence
-    cl_t, v_t = verdict_for([fl("EFA", 1e6), fl("TLT", 0.5e6), fl("TIP", 0.5e6)])
+    cl_t, v_t = verdict_for([fl("EFA", 1e6), fl("TLT", 0.5e6), fl("TIP", 0.5e6)],
+                            skip=set(GROUPS["International"][1]))
     ct = cl_t.set_index("asset_class")
     if not ct.loc["International equity", "thin"] or ct.loc["Treasuries", "thin"] or ct.loc["Cash-like", "thin"]:
         f.append(f"thin flag: Intl 1-of-{ct.loc['International equity', 'total']} must be thin, "
@@ -633,6 +898,92 @@ def selftest() -> dict:
         columns=["group", "flow_usd"]), pd.DataFrame(columns=["ticker", "measurable", "flow_usd"]), 20)
     if v_none["kind"] != "unavailable":
         f.append(f"no measured stock or safe fund must give 'unavailable': {v_none['kind']}")
+    # ── v1.2: thin classes leave the verdict; borderline in typical days; steps; record
+    # US equity +0.20% (flat) with a thin International class at +5%: the thin class must not decide
+    cl_v, v_v = verdict_for([fl("XLK", 0.1e6), fl("EFA", 2.5e6), fl("TLT", 0.5e6)],
+                            skip=set(GROUPS["International"][1]) - {"EFA"})
+    rec = v_v.get("record") or {}
+    if v_v["kind"] != "stocks_flat" or abs((rec.get("stocks_pct") or 0) - 0.20) > 1e-6 \
+            or not (rec.get("stocks_all_pct") or 0) > MATERIAL_PCT:
+        f.append(f"a thin class must not move the verdict (US +0.20% flat; with thin Intl it would be 'in'): "
+                 f"{v_v['kind']} {rec}")
+    if not any("With the thin class included" in e for e in v_v["evidence"]):
+        f.append("evidence must show what the reading would be with the thin class included")
+    # typical day: daily changes of the history's stock reading, sample std
+    hist = [{"date": f"2026-10-{i + 1:02d}", "stocks": x, "safety": 1.0, "kind": "stocks_flat"}
+            for i, x in enumerate([0.10, 0.30, 0.20, 0.40, 0.10, 0.30, 0.20, 0.25, 0.15, 0.35, 0.22, 0.20])]
+    diffs = np.diff([h["stocks"] for h in hist])
+    if abs(typical_day(hist) - float(np.std(diffs, ddof=1))) > 1e-12:
+        f.append("typical_day must be the sample std of the reading's daily changes")
+    if typical_day(hist[:MIN_NOISE_OBS]) is not None:
+        f.append(f"typical_day needs at least {MIN_NOISE_OBS} daily changes")
+    if typical_day([dict(h, stocks=0.3) for h in hist]) is not None:
+        f.append("a reading with no variation gives no typical day (never zero, which would divide by zero)")
+    sd_ = typical_day(hist)
+    _, v_b = verdict_for([fl("XLK", 0.1e6), fl("TLT", 0.5e6)], history=hist)      # +0.20%: 0.05 from the line
+    if v_b.get("borderline") is not True or not v_b["verdict"].startswith("Borderline") or v_b["state"] != "borderline":
+        f.append(f"a reading 0.05 from the line with a {sd_:.2f} typical day must be borderline: {v_b['verdict']}")
+    if not any("Hold the regime's weights" in x for x in v_b["steps"]) or \
+            not any(x.startswith("Resolves when") for x in v_b["steps"]):
+        f.append(f"borderline steps must say hold the regime weights and what resolves it: {v_b['steps']}")
+    up_ = MATERIAL_PCT + sd_
+    if not any(f"{up_:+.2f}%" in x for x in v_b["steps"]):
+        f.append(f"the resolution threshold must be the line plus one typical day ({up_:+.2f}%): {v_b['steps']}")
+    dn_ = -MATERIAL_PCT - sd_
+    res_ = next((x for x in v_b["steps"] if x.startswith("Resolves when")), "")
+    if f"below {dn_:+.2f}%" not in res_ or (sd_ < MATERIAL_PCT) != ("firm 'no move' needs" in res_):
+        f.append(f"resolution must name the firm-out line ({dn_:+.2f}%) and the firm no-move zone when one exists: {res_}")
+    hwide = [dict(h, stocks=x) for h, x in zip(hist, [0.0, 0.6, 0.0, 0.6, 0.0, 0.6, 0.0, 0.6, 0.0, 0.6, 0.0, 0.2])]
+    _, v_w = verdict_for([fl("XLK", 0.1e6), fl("TLT", 0.5e6)], history=hwide)
+    res_w = next((x for x in v_w["steps"] if x.startswith("Resolves when")), "")
+    if "no reading counts as a firm 'no move'" not in res_w:
+        f.append(f"with a typical day wider than half the gap, the steps must say no firm no-move exists: {res_w}")
+    _, v_f = verdict_for([fl("XLK", 1.0e6), fl("TLT", 0.5e6)], history=hist)      # +2.0%: far past the line
+    if v_f.get("borderline") is not False or v_f["state"] != "new_money" or v_f["verdict"].startswith("Borderline"):
+        f.append(f"a reading many typical days past the line must be a firm call: {v_f['state']} {v_f['verdict']}")
+    if not any("never raises equity weights" in x for x in v_f["steps"]):
+        f.append(f"a firm into-stocks call must say it confirms but never raises weights: {v_f['steps']}")
+    _, v_n = verdict_for([fl("XLK", 0.1e6), fl("TLT", 0.5e6)])                     # no history
+    if v_n.get("borderline") is not None or not any("Typical day not measurable" in e for e in v_n["evidence"]):
+        f.append("without enough history the borderline test must be skipped and say so")
+    # sessions in state: the last readings all borderline -> run counts them
+    hb = [dict(h, stocks=0.21, kind="stocks_flat") for h in hist[-4:]]
+    hist2 = hist[:-4] + hb
+    _, v_r = verdict_for([fl("XLK", 0.105e6), fl("TLT", 0.5e6)], history=hist2)
+    if v_r.get("sessions_in_state", 0) < 4 or v_r["record"]["prev_state"] != "borderline":
+        f.append(f"sessions_in_state must count the consecutive borderline sessions: {v_r.get('sessions_in_state')}")
+    # hedge-vehicle sensitivity: SPY out, everything else in -> disagreement flagged in evidence and steps
+    _, v_h = verdict_for([fl("SPY", -6e6), fl("XLK", 2e6), fl("XLV", 2e6), fl("TLT", 0.5e6)], history=hist)
+    if not any("DISAGREES" in e for e in v_h["evidence"]) or not any(x.startswith("Lower confidence") for x in v_h["steps"]) \
+            or v_h["record"]["hedge_agrees"] is not False:
+        f.append(f"a call that flips without the hedging vehicles must be flagged: {v_h['record']}")
+    # the record carries every field the history log and the scorer need
+    need_ = {"stocks_pct", "stocks_all_pct", "stocks_ex_hedge_pct", "safety_pct", "typical_day", "margin_days",
+             "kind", "borderline", "state", "sessions_in_state", "prev_state", "hedge_agrees"}
+    if need_ - set(v_b["record"]):
+        f.append(f"record missing {sorted(need_ - set(v_b['record']))}")
+    # unavailable stays a refusal with a BLOCKED step, never a neutral reading
+    if not verdict_for([fl("GLD", 1e6)], fill=False)[1]["steps"][0].startswith("Level 2 is BLOCKED"):
+        f.append("unavailable must say Level 2 is blocked, not neutral")
+    # reading_history is point in time: a reading as of an earlier date ignores later rows
+    late = pd.concat([fl(t, 0.0, aum=1.0) for t in TICKER_GROUP if t not in ("XLK", "TLT")]
+                     + [series("XLK", [np.nan] + [0.0] * 64 + [50e6] * 5), fl("TLT", 0.5e6)], ignore_index=True)
+    rh = reading_history(late, 20, ok_q, n=8)
+    if len(rh) != 8 or abs(rh[0]["stocks"]) > 1e-9 or not rh[-1]["stocks"] > 0:
+        f.append(f"reading_history must be point in time (early cut-offs cannot see the late inflow): "
+                 f"{[round(h['stocks'] or 0, 3) for h in rh]}")
+
+    # history log: one row per session, a re-publish replaces only its own session
+    rec_a = dict(v_b["record"], date="2026-10-29", published_at="t1")
+    rec_b = dict(v_b["record"], date="2026-10-30", published_at="t2")
+    h1 = append_history(append_history(None, rec_a), rec_b)
+    h2 = append_history(h1, dict(rec_b, published_at="t3", stocks_pct=0.99))
+    if list(h2["date"]) != ["2026-10-29", "2026-10-30"] or h2["published_at"].tolist() != ["t1", "t3"] \
+            or list(h2.columns[:len(HISTORY_COLUMNS)]) != HISTORY_COLUMNS:
+        f.append(f"append_history: one row per session, latest publish wins, fixed columns: {h2.to_dict('records')}")
+    if not append_history(h2, None).equals(h2):
+        f.append("append_history must leave the log unchanged when there is no record (unavailable day)")
+
     # the published summary is JSON-safe and carries every part
     import json as _json
     bs = bridge_summary(d, 20, ok_q, now="2026-10-31T22:00:00+00:00")
@@ -640,6 +991,19 @@ def selftest() -> dict:
         _json.loads(_json.dumps(bs))
     except Exception as e:
         f.append(f"bridge summary must be JSON-safe: {e}")
+    if "steps" not in bs["verdict"]:
+        f.append("bridge summary verdict must carry the steps")
+    full = pd.concat([fl(t, 0.0, aum=1.0) for t in TICKER_GROUP if t not in ("XLK", "TLT")]
+                     + [fl("XLK", 1e6), fl("TLT", 0.5e6)], ignore_index=True)
+    bs2 = bridge_summary(full, 20, ok_q, now="2026-10-31T22:00:00+00:00")
+    r2 = bs2["verdict"].get("record") or {}
+    if r2.get("date") != str(dates[-1].date()) or r2.get("published_at") != "2026-10-31T22:00:00+00:00" \
+            or r2.get("measured") != len(TICKER_GROUP) or "borderline" not in r2:
+        f.append(f"bridge summary record must be dated, stamped and carry coverage and the borderline test: {r2}")
+    try:
+        _json.loads(_json.dumps(bs2, allow_nan=False))
+    except Exception as e:
+        f.append(f"bridge summary with a full verdict must be strict JSON (no NaN): {e}")
     for k in ("asset_classes", "themes", "verdict", "coverage", "excluded", "data_through"):
         if k not in bs:
             f.append(f"bridge summary missing {k}")
