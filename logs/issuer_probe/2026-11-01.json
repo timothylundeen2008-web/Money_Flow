@@ -1,0 +1,534 @@
+{
+  "run_at": "2026-11-01T20:33:29+00:00",
+  "agree_tol": 0.05,
+  "funds": {
+    "SGOV": {
+      "relay": {
+        "shares": 1160000000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.ishares.com/us/products/314116/",
+          "client": null,
+          "status": null,
+          "final_url": null,
+          "seconds": 0.6,
+          "attempts": [
+            "curl_cffi HTTP 403 557B",
+            "requests HTTP 403 400B"
+          ],
+          "verdict": "BLOCKED / ERROR",
+          "issuer": "ishares"
+        }
+      ]
+    },
+    "EFA": {
+      "relay": {
+        "shares": 742200000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.ishares.com/us/products/239623/",
+          "client": null,
+          "status": null,
+          "final_url": null,
+          "seconds": 0.4,
+          "attempts": [
+            "curl_cffi HTTP 403 557B",
+            "requests HTTP 403 400B"
+          ],
+          "verdict": "BLOCKED / ERROR",
+          "issuer": "ishares"
+        }
+      ]
+    },
+    "EEM": {
+      "relay": {
+        "shares": 463500000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.ishares.com/us/products/239637/",
+          "client": null,
+          "status": null,
+          "final_url": null,
+          "seconds": 0.5,
+          "attempts": [
+            "curl_cffi HTTP 403 557B",
+            "requests HTTP 403 400B"
+          ],
+          "verdict": "BLOCKED / ERROR",
+          "issuer": "ishares"
+        }
+      ]
+    },
+    "FXI": {
+      "relay": {
+        "shares": 114600000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.ishares.com/us/products/239536/",
+          "client": null,
+          "status": null,
+          "final_url": null,
+          "seconds": 0.2,
+          "attempts": [
+            "curl_cffi HTTP 403 557B",
+            "requests HTTP 403 400B"
+          ],
+          "verdict": "BLOCKED / ERROR",
+          "issuer": "ishares"
+        }
+      ]
+    },
+    "INDA": {
+      "relay": {
+        "shares": 122750000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.ishares.com/us/products/239659/",
+          "client": null,
+          "status": null,
+          "final_url": null,
+          "seconds": 0.3,
+          "attempts": [
+            "curl_cffi HTTP 403 557B",
+            "requests HTTP 403 400B"
+          ],
+          "verdict": "BLOCKED / ERROR",
+          "issuer": "ishares"
+        }
+      ]
+    },
+    "RING": {
+      "relay": {
+        "shares": 30700000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.ishares.com/us/products/239658/",
+          "client": null,
+          "status": null,
+          "final_url": null,
+          "seconds": 0.3,
+          "attempts": [
+            "curl_cffi HTTP 403 557B",
+            "requests HTTP 403 400B"
+          ],
+          "verdict": "BLOCKED / ERROR",
+          "issuer": "ishares"
+        }
+      ]
+    },
+    "EWJ": {
+      "relay": {
+        "shares": 251100000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.ishares.com/us/products/239665/",
+          "client": null,
+          "status": null,
+          "final_url": null,
+          "seconds": 0.2,
+          "attempts": [
+            "curl_cffi HTTP 403 557B",
+            "requests HTTP 403 400B"
+          ],
+          "verdict": "BLOCKED / ERROR",
+          "issuer": "ishares"
+        }
+      ]
+    },
+    "TIP": {
+      "relay": {
+        "shares": 137100000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.ishares.com/us/products/239467/",
+          "client": null,
+          "status": null,
+          "final_url": null,
+          "seconds": 0.3,
+          "attempts": [
+            "curl_cffi HTTP 403 557B",
+            "requests HTTP 403 400B"
+          ],
+          "verdict": "BLOCKED / ERROR",
+          "issuer": "ishares"
+        }
+      ]
+    },
+    "GLD": {
+      "relay": {
+        "shares": 352400000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.ssga.com/us/en/intermediary/etfs/spdr-gold-shares-gld",
+          "client": "curl_cffi",
+          "status": 200,
+          "final_url": "https://www.ssga.com/us/en/intermediary/etfs/spdr-gold-shares-gld",
+          "seconds": 0.4,
+          "attempts": [
+            "curl_cffi HTTP 200 183336B"
+          ],
+          "title": "GLD: SPDR\u00ae Gold Shares",
+          "bytes": 183336,
+          "for_ticker": true,
+          "counts": [
+            {
+              "value": 131009640000.0,
+              "asof": "Oct 30 2026",
+              "context": "s total assets, minus liabilities, divided by the number of shares outstanding.&lt;/p>&#34;,&#34;originalValue&#34;:&#34;358.63574915&#34;},&#34;aum&#34;:{&#34;label&#34;:&#34;Assets Under Managemen"
+            },
+            {
+              "value": 131009640000.0,
+              "asof": "Oct 30 2026",
+              "context": "s total assets, minus liabilities, divided by the number of shares outstanding. $358.64 as of Oct 30 2026 Base Currency USD Assets Under Management $131,009.64 M as of Oct 30 2026 Gross Expense Rati"
+            },
+            {
+              "value": 365300000.0,
+              "asof": "Oct 30 2026",
+              "context": "s total assets, minus liabilities, divided by the number of shares outstanding. $358.64 Shares Outstanding 365.30 M Assets Under Management $131,009.64 M Most Recent NAV / NAV History Fund Performan"
+            },
+            {
+              "value": 365300000.0,
+              "asof": "Oct 30 2026",
+              "context": "ities, divided by the number of shares outstanding. $358.64 Shares Outstanding 365.30 M Assets Under Management $131,009.64 M Most Recent NAV / NAV History Fund Performance Fund Inception Date : Nov"
+            }
+          ],
+          "ratio_to_relay": 1.0366,
+          "verdict": "USABLE",
+          "issuer": "ssga",
+          "sample": "logs/issuer_probe/samples/GLD_ssga.txt"
+        },
+        {
+          "url": "https://www.spdrgoldshares.com/usa/",
+          "client": "curl_cffi",
+          "status": 200,
+          "final_url": "https://www.spdrgoldshares.com/usa/",
+          "seconds": 0.3,
+          "attempts": [
+            "curl_cffi HTTP 200 83553B"
+          ],
+          "title": "SPDR\u00ae Gold Shares | SPDR\u00ae Gold MiniShares\u00ae | Gold backed ETFs | New York Stock Exchange | World Gold Trust Services",
+          "bytes": 83553,
+          "for_ticker": false,
+          "counts": [],
+          "verdict": "WRONG PAGE",
+          "issuer": "spdrgold",
+          "sample": "logs/issuer_probe/samples/GLD_spdrgold.txt"
+        }
+      ]
+    },
+    "VGT": {
+      "relay": {
+        "shares": 1240000000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://investor.vanguard.com/investment-products/etfs/profile/vgt",
+          "client": "curl_cffi",
+          "status": 200,
+          "final_url": "https://investor.vanguard.com/investment-products/etfs/profile/vgt",
+          "seconds": 0.5,
+          "attempts": [
+            "curl_cffi HTTP 200 220740B"
+          ],
+          "title": "VGT-Vanguard Information Technology ETF | Vanguard",
+          "bytes": 220740,
+          "for_ticker": true,
+          "counts": [],
+          "verdict": "NO COUNT ON PAGE (likely rendered by JavaScript)",
+          "issuer": "vanguard",
+          "sample": "logs/issuer_probe/samples/VGT_vanguard.txt"
+        },
+        {
+          "url": "https://advisors.vanguard.com/investments/products/vgt/vanguard-information-technology-etf",
+          "client": "curl_cffi",
+          "status": 200,
+          "final_url": "https://advisors.vanguard.com/investments/products/vgt/vanguard-information-technology-etf",
+          "seconds": 0.8,
+          "attempts": [
+            "curl_cffi HTTP 200 162036B"
+          ],
+          "title": "VGT - Vanguard Information Technology ETF",
+          "bytes": 162036,
+          "for_ticker": true,
+          "counts": [],
+          "verdict": "NO COUNT ON PAGE (likely rendered by JavaScript)",
+          "issuer": "vanguard_adv",
+          "sample": "logs/issuer_probe/samples/VGT_vanguard_adv.txt"
+        }
+      ]
+    },
+    "PBJ": {
+      "relay": {
+        "shares": 2230000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.invesco.com/us/financial-products/etfs/product-detail?audienceType=Investor&ticker=PBJ",
+          "client": "curl_cffi",
+          "status": 200,
+          "final_url": "https://www.invesco.com/us/en/financial-products/etfs/invesco-food-beverage-etf.html",
+          "seconds": 0.5,
+          "attempts": [
+            "curl_cffi HTTP 200 610001B"
+          ],
+          "title": "Invesco Food &amp; Beverage ETF | Invesco US",
+          "bytes": 610001,
+          "for_ticker": false,
+          "counts": [],
+          "verdict": "WRONG PAGE",
+          "issuer": "invesco",
+          "sample": "logs/issuer_probe/samples/PBJ_invesco.txt"
+        }
+      ]
+    },
+    "PDBC": {
+      "relay": {
+        "shares": 400700000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.invesco.com/us/financial-products/etfs/product-detail?audienceType=Investor&ticker=PDBC",
+          "client": "curl_cffi",
+          "status": 200,
+          "final_url": "https://www.invesco.com/us/en/financial-products/etfs/invesco-optimum-yield-diversified-commodity-strategy-no-k-1-etf.html",
+          "seconds": 0.8,
+          "attempts": [
+            "curl_cffi HTTP 200 616476B"
+          ],
+          "title": "Invesco Optimum Yield Diversified Commodity Strategy No K-1 ETF | Invesco US",
+          "bytes": 616476,
+          "for_ticker": false,
+          "counts": [],
+          "verdict": "WRONG PAGE",
+          "issuer": "invesco",
+          "sample": "logs/issuer_probe/samples/PDBC_invesco.txt"
+        }
+      ]
+    },
+    "DBA": {
+      "relay": {
+        "shares": 43200000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.invesco.com/us/financial-products/etfs/product-detail?audienceType=Investor&ticker=DBA",
+          "client": "curl_cffi",
+          "status": 200,
+          "final_url": "https://www.invesco.com/us/en/financial-products/etfs/invesco-db-agriculture-fund.html",
+          "seconds": 0.4,
+          "attempts": [
+            "curl_cffi HTTP 200 649709B"
+          ],
+          "title": "Invesco DB Agriculture Fund | Invesco US",
+          "bytes": 649709,
+          "for_ticker": false,
+          "counts": [],
+          "verdict": "WRONG PAGE",
+          "issuer": "invesco",
+          "sample": "logs/issuer_probe/samples/DBA_invesco.txt"
+        }
+      ]
+    },
+    "USO": {
+      "relay": {
+        "shares": 14820000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.uscfinvestments.com/uso",
+          "client": "curl_cffi",
+          "status": 200,
+          "final_url": "https://www.uscfinvestments.com/uso",
+          "seconds": 0.3,
+          "attempts": [
+            "curl_cffi HTTP 200 47764B"
+          ],
+          "title": "USO | United States Oil Fund | The Original Oil ETF",
+          "bytes": 47764,
+          "for_ticker": true,
+          "counts": [],
+          "verdict": "NO COUNT ON PAGE (likely rendered by JavaScript)",
+          "issuer": "uscf",
+          "sample": "logs/issuer_probe/samples/USO_uscf.txt"
+        }
+      ]
+    },
+    "AMLP": {
+      "relay": {
+        "shares": 241210000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.alpsfunds.com/products/etf/amlp",
+          "client": "curl_cffi",
+          "status": 200,
+          "final_url": "https://www.alpsfunds.com/exchange-traded-funds/amlp",
+          "seconds": 0.6,
+          "attempts": [
+            "curl_cffi HTTP 200 420996B"
+          ],
+          "title": "Alerian MLP ETF | ALPS Funds",
+          "bytes": 420996,
+          "for_ticker": false,
+          "counts": [],
+          "verdict": "WRONG PAGE",
+          "issuer": "alps",
+          "sample": "logs/issuer_probe/samples/AMLP_alps.txt"
+        }
+      ]
+    },
+    "KMLM": {
+      "relay": {
+        "shares": 19400000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://kraneshares.com/kmlm/",
+          "client": "curl_cffi",
+          "status": 200,
+          "final_url": "https://kraneshares.com/etf/kmlm/",
+          "seconds": 0.3,
+          "attempts": [
+            "curl_cffi HTTP 200 203585B"
+          ],
+          "title": "Managed Futures ETF | KMLM | KraneShares Mount Lucas Strategy",
+          "bytes": 203585,
+          "for_ticker": true,
+          "counts": [
+            {
+              "value": 19400002.0,
+              "asof": "10/30/2026",
+              "context": "E CUSIP 500767652 ISIN US5007676522 Net Assets $595,566,843 Shares Outstanding 19,400,002 Total Annual Fund Operating Expense 0.90% Inception Date 12/1/2020 Distribution Frequency Quarterly Underlyi"
+            }
+          ],
+          "ratio_to_relay": 1.0,
+          "verdict": "USABLE",
+          "issuer": "kraneshares",
+          "sample": "logs/issuer_probe/samples/KMLM_kraneshares.txt"
+        }
+      ]
+    },
+    "USFR": {
+      "relay": {
+        "shares": 422040000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.wisdomtree.com/investments/etfs/fixed-income/usfr",
+          "client": null,
+          "status": null,
+          "final_url": null,
+          "seconds": 0.2,
+          "attempts": [
+            "curl_cffi HTTP 403 6075B",
+            "requests HTTP 403 5883B"
+          ],
+          "verdict": "BLOCKED / ERROR",
+          "issuer": "wisdomtree"
+        }
+      ]
+    },
+    "OIH": {
+      "relay": {
+        "shares": 4800000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://www.vaneck.com/us/en/investments/oil-services-etf-oih/",
+          "client": "curl_cffi",
+          "status": 200,
+          "final_url": "https://www.vaneck.com/us/en/investments/oil-services-etf-oih/",
+          "seconds": 0.9,
+          "attempts": [
+            "curl_cffi HTTP 200 282608B"
+          ],
+          "title": "OIH - VanEck Oil Services ETF (US) | Holdings &amp; Performance | VanEck",
+          "bytes": 282608,
+          "for_ticker": true,
+          "counts": [],
+          "verdict": "NO COUNT ON PAGE (likely rendered by JavaScript)",
+          "issuer": "vaneck",
+          "sample": "logs/issuer_probe/samples/OIH_vaneck.txt"
+        }
+      ]
+    },
+    "HACK": {
+      "relay": {
+        "shares": 28500000.0,
+        "date": "2026-10-30",
+        "source": "thirdparty_stockanalysis"
+      },
+      "candidates": [
+        {
+          "url": "https://amplifyetfs.com/hack/",
+          "client": "curl_cffi",
+          "status": 200,
+          "final_url": "https://amplifyetfs.com/hack/",
+          "seconds": 0.3,
+          "attempts": [
+            "curl_cffi HTTP 200 221154B"
+          ],
+          "title": "HACK - Amplify ETFs",
+          "bytes": 221154,
+          "for_ticker": true,
+          "counts": [
+            {
+              "value": 28500000.0,
+              "asof": "10/30/2026",
+              "context": "xchange NYSE Arca CUSIP 032108664 Net Assets $3,552,232,254 Shares Outstanding 28,500,000 Holdings (view all holdings) 23 Total Expense Ratio i 0.60% Loading fund details... Index Details Index Name"
+            }
+          ],
+          "ratio_to_relay": 1.0,
+          "verdict": "USABLE",
+          "issuer": "amplify",
+          "sample": "logs/issuer_probe/samples/HACK_amplify.txt"
+        }
+      ]
+    }
+  }
+}
