@@ -1,6 +1,16 @@
 """
-etf_flow_tracker.py  (v2.2 — November 2026)
+etf_flow_tracker.py  (v2.3 — November 2026)
 ──────────────────────────────────────────────────────────────────────────────
+v2.3 (2026-11-01, fix_status N18): a day whose flow exceeds
+  IMPLAUSIBLE_DAILY_FLOW_PCT of AUM is still FLAGGED, but for REPORTED share
+  counts (issuer or relay) it is no longer dropped. Dropping one day broke
+  the 20-day sum: XRT's +23% creation on 10/21 was deleted while the
+  redemptions around it were kept, so XRT read -23% of AUM when its shares
+  actually fell 3%; XHB read +19% (true +3%), XTN -0.3% (true -27%). A
+  reported count that spikes and reverses nets out in the sum by itself.
+  Estimated (aum_implied) rows keep the guard. flow_vs_price_divergence now
+  divides by start-of-window AUM, like the Flow Map.
+
 v2.2 (2026-11-01, fix_status N31): every row is dated by the trading SESSION
   it describes, not by the calendar day of the poll. Polls on weekends and
   holidays used to add rows of their own (Sat 10/24, Sat 10/31, Sun 11/01), so
@@ -1032,7 +1042,12 @@ def compute_flows(store: str = DEFAULT_STORE) -> pd.DataFrame:
         g["net_flow"] = (d_shares * g["price"]).where(~g["is_split"], np.nan)
 
         g["implausible"] = (g["net_flow"].abs() / g["aum"]) > IMPLAUSIBLE_DAILY_FLOW_PCT
-        g.loc[g["implausible"], "net_flow"] = np.nan
+        # v2.3 (N18): only ESTIMATED rows lose a big day. A reported count's big
+        # day is real creation/redemption (small, heavily shorted funds such as
+        # XRT routinely move 20%+ in a day); dropping it alone breaks the sum.
+        reported = (g["shares_source"].astype(str).str.startswith(REPORTED_PREFIXES)
+                    if "shares_source" in g.columns else pd.Series(False, index=g.index))
+        g.loc[g["implausible"] & ~reported, "net_flow"] = np.nan
 
         g["net_flow_5d"] = g["net_flow"].rolling(5, min_periods=2).sum()
         g["net_flow_20d"] = g["net_flow"].rolling(20, min_periods=5).sum()
@@ -1066,7 +1081,7 @@ def flow_vs_price_divergence(store: str = DEFAULT_STORE,
                          "divergence": False})
             continue
         flow = float(g["net_flow"].iloc[-window:].sum(skipna=True))
-        aum = float(g["aum"].iloc[-1])
+        aum = float(g["aum"].iloc[-window - 1])          # v2.3: start-of-window AUM, as in the Flow Map
         flow_pct = (flow / aum * 100) if aum else np.nan
 
         if px_chg > 0 and flow > 0:
@@ -1562,6 +1577,29 @@ def selftest() -> dict:
     o7b = _upsert(s7, pd.DataFrame([r_("2026-11-02", 106.0)]))
     if not o7b[["date", "ticker", "shares_outstanding"]].equals(o7[["date", "ticker", "shares_outstanding"]]):
         f.append("a second write must not shift migrated rows again")
+    # v2.3 (N18): a reported fund's big day stays in the sum, so the 20-day flow equals the share change
+    big = [4.0e6, 3.9e6, 3.8e6, 4.8e6, 4.7e6, 4.6e6, 4.5e6]      # one +26% creation (XRT 10/21), small redemptions around it
+    s8 = os.path.join(tempfile.mkdtemp(), "h.csv")
+    pd.DataFrame([{"date": d.date().isoformat(), "ticker": "XR", "shares_outstanding": v, "price": 10.0,
+                   "shares_source": "issuer_spdr", SESSION_COL: True} for d, v in zip(dates[:7], big)]
+                 + [{"date": d.date().isoformat(), "ticker": "EST", "shares_outstanding": v, "price": 10.0,
+                     "shares_source": "aum_implied", SESSION_COL: True} for d, v in zip(dates[:7], big)]).to_csv(s8, index=False)
+    f8 = compute_flows(s8)
+    xr, est = f8[f8["ticker"] == "XR"], f8[f8["ticker"] == "EST"]
+    if abs(float(xr["net_flow"].sum(skipna=True)) - (4.5e6 - 4.0e6) * 10) > 1e-6 or not xr["implausible"].any():
+        f.append(f"a reported fund's big days must stay in the sum (net = share change x price) and still be flagged: "
+                 f"{xr['net_flow'].tolist()}")
+    if est.loc[est["implausible"], "net_flow"].notna().any():
+        f.append("an estimated (aum_implied) row's implausible day must still be dropped")
+    dv8 = flow_vs_price_divergence(s8, window=5)
+    if dv8.empty or "XR" not in set(dv8["ticker"]):
+        f.append("the divergence test fund must be present (test would otherwise skip)")
+    else:
+        r8 = dv8.set_index("ticker").loc["XR"]
+        g8 = f8[f8["ticker"] == "XR"].sort_values("date")
+        want8 = float(g8["net_flow"].iloc[-5:].sum()) / float(g8["aum"].iloc[-6]) * 100
+        if abs(r8["net_flow_pct_aum"] - round(want8, 2)) > 0.011:
+            f.append(f"divergence % of AUM must use start-of-window AUM: {r8['net_flow_pct_aum']} vs {want8:.2f}")
     return {"ok": not f, "failures": f,
             "quality": {k: (x["trustworthy"], x["aum_update_rate"], x["price_mirror_corr"]) for k, x in q.items()}}
 
