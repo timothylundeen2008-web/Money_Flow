@@ -1,6 +1,11 @@
 """
-publish_to_checklist.py  (v1 — July 2026)
+publish_to_checklist.py  (v1.1 — October 2026)
 ──────────────────────────────────────────────────────────────────────────────
+v1.1 (2026-10-31): also publishes flow_map_summary.json (flow_map.bridge_summary:
+  20-session net ETF flows by theme and asset class, with a verdict) for the
+  Portfolio-Tracker brief's "Where the money went" section. A failure there is
+  logged and never blocks the main summary.
+
 DEPLOYMENT.md Step 5, implemented: computes every Tier-A/B/C signal this repo
 produces and publishes them to the shared bridge the All-Weather checklist
 reads (rotation_bridge.publish_summary → storage_backend → GitHub).
@@ -98,6 +103,24 @@ def main() -> int:
         flow_div = flow_div.copy()
         flow_div["measurable"] = flow_div["ticker"].isin(meas or set())
         print(f"[publish] flow_divergence measurable: {int(flow_div['measurable'].sum())} of {len(flow_div)}")
+
+    # v1.1 (Oct 2026): the "where did the money go" summary for the brief:
+    # 20-session net creations/redemptions by theme and asset class, trusted
+    # funds only, with a rule-based verdict. Written as its own bridge file so
+    # the shared rotation_bridge.py stays byte-identical across repos.
+    def _flow_map_summary():
+        from etf_flow_tracker import compute_flows, ticker_quality
+        import flow_map
+        from storage_backend import write_json
+        s = flow_map.bridge_summary(compute_flows(), flow_map.DEFAULT_WINDOW, ticker_quality)
+        res = write_json(flow_map.SUMMARY_FILE, s,
+                         message=f"flow map: publish summary ({datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC)")
+        return s, res
+    fms = _safe("flow_map summary", _flow_map_summary)
+    if fms:
+        s, res = fms
+        print(f"[publish] flow_map summary: {s['coverage']['measured']} of {s['coverage']['total']} funds measured; "
+              f"verdict {s['verdict']['kind']}; durable={res.get('durable', False)}")
 
     schema = _safe("COT schema check", verify_schema) or {}
     schema_ok = bool(schema) and all(v.get("ok") for v in schema.values())
