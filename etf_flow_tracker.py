@@ -1,5 +1,16 @@
 """
-etf_flow_tracker.py  (v2.4 — November 2026)
+etf_flow_tracker.py  (v2.5 — November 2026)
+──────────────────────────────────────────────────────────────────────────────
+v2.5 (2026-11-07, fix_status N36): split detection no longer needs shares and
+  price to offset on the same row. SOXX and ITA split 3-for-1 on 2026-11-05;
+  the relay posted the new share count a session after the price adjusted,
+  so +$24.6B and +$7.75B of fake creations reached the Flow Map (US equity
+  +2.47% instead of ~+1.0%) and logged a false flow_into_stocks signal.
+  _split_adjust() finds integer-ratio share jumps (2-20x or inverse, within
+  3%), confirms them with the price within 3 sessions either side, and
+  back-adjusts earlier shares and prices into post-split units. A
+  half-adjusted price bar gets NaN price and no flow. An integer-ratio jump
+  the price never confirms books no flow (split_suspect).
 ──────────────────────────────────────────────────────────────────────────────
 v2.4 (2026-11-01, fix_status N30 step 2): three issuer sources that the
   Issuer Probe (logs/issuer_probe/2026-11-01.json) found reachable from the
@@ -1106,10 +1117,100 @@ def ticker_quality(g: pd.DataFrame, window: int = 20) -> dict:
 
 
 def _flag_splits(g: pd.DataFrame) -> pd.Series:
+    """Same-row split (shares and price offset on one row). Kept for callers;
+    compute_flows now uses _split_adjust, which also catches lagged splits."""
     sh_ratio = g["shares_outstanding"] / g["shares_outstanding"].shift(1)
     px_ratio = g["price"] / g["price"].shift(1)
     product = sh_ratio * px_ratio
     return (sh_ratio.sub(1).abs() > 0.20) & (product.sub(1).abs() < 0.05)
+
+
+# v2.5 (N36): a relay often posts the post-split share count a session or two
+# after the price adjusts (SOXX and ITA 3-for-1 on 2026-11-05: price on 11/05,
+# shares on 11/06). Same-row matching missed it and booked +$24.6B / +$7.75B
+# of fake creations. Splits are now found on the SHARE ratio alone when it is
+# an integer split ratio, then confirmed by the price within a few sessions.
+SPLIT_RATIOS = (2, 3, 4, 5, 8, 10, 20)
+SPLIT_RATIO_TOL = 0.03          # share ratio within 3% of N (or 1/N)
+SPLIT_LOOK = 3                  # sessions either side to find the price adjustment
+SPLIT_PRICE_TOL = 0.25          # |log distance| for a price to count as pre/post-split
+
+
+def _split_ratio(r: float):
+    if not (r == r) or r <= 0:
+        return None
+    for n in SPLIT_RATIOS:
+        for cand in (float(n), 1.0 / n):
+            if abs(r / cand - 1) <= SPLIT_RATIO_TOL:
+                return cand
+    return None
+
+
+def _split_adjust(g: pd.DataFrame) -> pd.DataFrame:
+    """Back-adjust a ticker's history across share splits so share counts and
+    prices are in post-split units throughout (AUM is unchanged).
+    Adds columns: split_event (the row where shares jumped, confirmed),
+    split_suspect (integer-ratio jump the price never confirmed: no flow
+    counted), price_unreliable (a row whose stored price is neither pre- nor
+    post-split, e.g. a half-adjusted bar: price and flow set to NaN).
+    `g` must be one ticker, sorted by date, with a default RangeIndex."""
+    g = g.copy()
+    g["split_event"] = False
+    g["split_suspect"] = False
+    g["price_unreliable"] = False
+    sh = g["shares_outstanding"].astype(float)
+    n_rows = len(g)
+    for j in range(1, n_rows):
+        prev, cur = sh.iloc[j - 1], sh.iloc[j]
+        if not (prev == prev and cur == cur) or prev <= 0:
+            continue
+        if "shares_source" in g.columns:
+            a_, b_ = str(g["shares_source"].iloc[j - 1]), str(g["shares_source"].iloc[j])
+            if a_.split("_")[0] != b_.split("_")[0]:
+                continue        # a jump across a source switch is the continuity rule's job, not a split
+        n = _split_ratio(cur / prev)
+        if n is None:
+            continue
+        px = g["price"].astype(float)
+        hi = min(n_rows - 1, j + SPLIT_LOOK)
+        ref = px.iloc[hi]
+        if not (ref == ref) or ref <= 0:
+            g.loc[j, "split_suspect"] = True
+            continue
+        lo = max(0, j - SPLIT_LOOK)
+        cls = {}
+        for r in range(lo, hi + 1):
+            p = px.iloc[r]
+            if not (p == p) or p <= 0:
+                cls[r] = "bad"
+                continue
+            d_post = abs(np.log(p / ref))
+            # shares x n  =>  the pre-split price was n times the post-split price
+            d_pre = abs(np.log(p / (ref * n)))
+            if d_pre <= SPLIT_PRICE_TOL and d_pre < d_post:
+                cls[r] = "pre"
+            elif d_post <= SPLIT_PRICE_TOL:
+                cls[r] = "post"
+            else:
+                cls[r] = "bad"
+        if not any(v == "pre" for v in cls.values()):
+            g.loc[j, "split_suspect"] = True      # price never adjusted: not a confirmed split
+            continue
+        g.loc[j, "split_event"] = True
+        for col in ("shares_outstanding", "relay_shares", "aum_implied_shares"):
+            if col in g.columns:
+                g.loc[:j - 1, col] = g.loc[:j - 1, col].astype(float) * n
+        for r in range(0, n_rows):
+            if r < lo:
+                g.loc[r, "price"] = float(px.iloc[r]) / n
+            elif r <= hi:
+                if cls[r] == "pre":
+                    g.loc[r, "price"] = float(px.iloc[r]) / n
+                elif cls[r] == "bad":
+                    g.loc[r, "price"] = np.nan
+                    g.loc[r, "price_unreliable"] = True
+        sh = g["shares_outstanding"].astype(float)
+    return g
 
 
 def compute_flows(store: str = DEFAULT_STORE) -> pd.DataFrame:
@@ -1122,8 +1223,13 @@ def compute_flows(store: str = DEFAULT_STORE) -> pd.DataFrame:
         g = g.sort_values("date").copy()
         if len(g) < 2:
             continue
+        # v2.5 (N36): back-adjust across splits (lagged relay counts included)
+        g = _split_adjust(g.reset_index(drop=True))
         g["aum"] = g["shares_outstanding"] * g["price"]
-        g["is_split"] = _flag_splits(g).fillna(False)
+        g["is_split"] = _flag_splits(g).fillna(False) | g["split_suspect"]
+        # a half-adjusted bar has no usable price: value its share change at the
+        # last good (adjusted) price so the creation is not lost
+        g["_flow_px"] = g["price"].where(~g["price_unreliable"]).ffill()
         g["stale_aum"] = _stale_aum_rows(g)
 
         # Measure share change between consecutive INFORMATIVE rows only
@@ -1162,7 +1268,7 @@ def compute_flows(store: str = DEFAULT_STORE) -> pd.DataFrame:
             d_shares.iloc[first_issuer] = np.nan   # never diff reported vs estimated
         if break_at is not None:
             d_shares.iloc[:break_at + 1] = np.nan  # relay level was wrong: nothing before or at the switch counts
-        g["net_flow"] = (d_shares * g["price"]).where(~g["is_split"], np.nan)
+        g["net_flow"] = (d_shares * g["_flow_px"]).where(~g["is_split"], np.nan)
 
         g["implausible"] = (g["net_flow"].abs() / g["aum"]) > IMPLAUSIBLE_DAILY_FLOW_PCT
         # v2.3 (N18): only ESTIMATED rows lose a big day. A reported count's big
@@ -1191,7 +1297,9 @@ def flow_vs_price_divergence(store: str = DEFAULT_STORE,
         g = g.sort_values("date")
         if len(g) < window + 1:
             continue
-        px_chg = float(g["price"].iloc[-1] / g["price"].iloc[-window - 1] - 1) * 100
+        _pw = g["price"].iloc[-window - 1:]
+        _pw = _pw[_pw.notna()]                      # v2.5: skip a half-adjusted split bar
+        px_chg = (float(_pw.iloc[-1] / _pw.iloc[0] - 1) * 100) if len(_pw) > 1 else np.nan
         q = ticker_quality(g)
         if not q["trustworthy"]:
             # Sept 2026: a stale-AUM series says nothing about flow. Report it
@@ -1204,7 +1312,8 @@ def flow_vs_price_divergence(store: str = DEFAULT_STORE,
                          "divergence": False})
             continue
         flow = float(g["net_flow"].iloc[-window:].sum(skipna=True))
-        aum = float(g["aum"].iloc[-window - 1])          # v2.3: start-of-window AUM, as in the Flow Map
+        _aw = g["aum"].iloc[-window - 1:].dropna()
+        aum = float(_aw.iloc[0]) if len(_aw) else np.nan  # v2.3: start-of-window AUM, as in the Flow Map
         flow_pct = (flow / aum * 100) if aum else np.nan
 
         if px_chg > 0 and flow > 0:
@@ -1811,6 +1920,47 @@ def selftest() -> dict:
         f.append("a relay row after the first issuer row must carry no flow (the 99M fallback print is ignored)")
     if not (ct["shares_outstanding"] == 99e6).any():
         f.append("the fallback relay row must be present in the test (else the check above proves nothing)")
+    # v2.5 (N36): splits. LAG = the SOXX case (price adjusts one session before
+    # the relay's share count, with a half-adjusted bar in between); SAME = shares
+    # and price on one row; FAKE = an integer-ratio share jump the price never
+    # confirms (relay glitch) -> no flow; REAL3 = a genuine +3% creation stays.
+    s10 = os.path.join(tempfile.mkdtemp(), "h.csv")
+    d10 = [d.date().isoformat() for d in dates[:8]]
+    def _rows(tk, shares, prices):
+        return [{"date": d, "ticker": tk, "shares_outstanding": sv, "price": pv,
+                 "shares_source": "thirdparty_stockanalysis", SESSION_COL: True}
+                for d, sv, pv in zip(d10, shares, prices)]
+    lag = _rows("LAG", [90e6, 90e6, 91e6, 92e6, 92.5e6, 276e6, 276e6, 277e6],
+                [450, 455, 460, 465, 225, 140, 141, 142])
+    same = _rows("SAME", [10e6, 10e6, 10.1e6, 20.2e6, 20.2e6, 20.3e6, 20.3e6, 20.3e6],
+                 [100, 101, 102, 51, 51.5, 52, 52, 52])
+    fake = _rows("FAKE", [50e6, 50e6, 50e6, 150e6, 150e6, 150e6, 150e6, 150e6],
+                 [80, 80.5, 81, 81.5, 82, 82.5, 83, 83.5])
+    real3 = _rows("REAL3", [10e6, 10e6, 10e6, 10.3e6, 10.3e6, 10.3e6, 10.3e6, 10.3e6],
+                  [50, 50, 50, 50, 50, 50, 50, 50])
+    pd.DataFrame(lag + same + fake + real3).to_csv(s10, index=False)
+    f10 = compute_flows(s10)
+    lg = f10[f10["ticker"] == "LAG"].reset_index(drop=True)
+    # post-split units: +3M at 153.33, +3M at 155, +1.5M on the half-adjusted day valued at 155,
+    # -1.5M at 140, +1M at 142
+    lag_true = 3e6 * 460 / 3 + 3e6 * 465 / 3 + 1.5e6 * 465 / 3 - 1.5e6 * 140 + 1e6 * 142
+    if abs(float(lg["net_flow"].sum(skipna=True)) - lag_true) > 1.0:
+        f.append(f"a lagged split must book only real creations: {lg['net_flow'].sum(skipna=True):.0f} vs {lag_true:.0f}")
+    if not bool(lg["split_event"].iloc[5]) or not bool(lg["price_unreliable"].iloc[4]):
+        f.append("the lagged split must be flagged on the share row, with the half-adjusted bar marked unreliable")
+    if (abs(float(lg["price"].iloc[3]) - 155.0) > 1e-6 or abs(float(lg["price"].iloc[0]) - 150.0) > 1e-6
+            or abs(float(lg["shares_outstanding"].iloc[0]) - 270e6) > 1):
+        f.append("history before the split must be back-adjusted into post-split units")
+    sm = f10[f10["ticker"] == "SAME"].reset_index(drop=True)
+    sm_true = 0.2e6 * 102 / 2 + 0.1e6 * 52                   # post-split units
+    if abs(float(sm["net_flow"].sum(skipna=True)) - sm_true) > 1.0:
+        f.append(f"a same-row split must book only real creations: {sm['net_flow'].sum(skipna=True):.0f} vs {sm_true:.0f}")
+    fk = f10[f10["ticker"] == "FAKE"].reset_index(drop=True)
+    if fk["net_flow"].abs().sum(skipna=True) > 1.0 or not bool(fk["split_suspect"].iloc[3]):
+        f.append(f"an unconfirmed integer-ratio share jump must book no flow: {fk['net_flow'].tolist()}")
+    r3 = f10[f10["ticker"] == "REAL3"].reset_index(drop=True)
+    if abs(float(r3["net_flow"].sum(skipna=True)) - 0.3e6 * 50) > 1.0:
+        f.append("a genuine +3% creation must still be booked")
     return {"ok": not f, "failures": f,
             "quality": {k: (x["trustworthy"], x["aum_update_rate"], x["price_mirror_corr"]) for k, x in q.items()}}
 
