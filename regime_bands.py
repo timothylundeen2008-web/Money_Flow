@@ -305,22 +305,34 @@ def leadership_ok(fetch_prices: Callable,
 #   TLT trimmed     (-3)  Long duration stays hostage to term premium
 #                         regardless of where the FRONT end resolves. This is
 #                         the one sleeve the ambiguity does not rescue.
-#   Floaters  +4 / Bills +3  Carry with no duration risk. Paid to wait, and
-#                         floaters specifically benefit if the ambiguity
-#                         resolves toward hikes.
+#   Bills -2 / Floaters -1  C3 (adopted 2026-11-14, hedge lab v1.5 run
+#                         8e02577). The book used to ADD cash here (SGOV +3,
+#                         USFR +4 -> 8% and 7%). Ten of those points now go to
+#                         the two sleeves below, leaving SGOV 3% and USFR 2%.
+#   DBMF      +5          Second trend fund, a different manager and method
+#                         from KMLM. Same reason as "Trend" below.
+#   SCHP      +5          TIPS. Carry that keeps up with inflation if the
+#                         ambiguity resolves toward repression; dead cash
+#                         does not.
+#                         Tested result over 2005-2026 vs the old book:
+#                         +0.82 pts/yr, max drawdown -19.5% vs -20.0%, better
+#                         in both halves. DBMF and SCHP are ADDS vs base, so
+#                         each still has to pass entry_gate(); a blocked add
+#                         parks in SGOV, which is the pre-C3 position.
 #   Trend     +3          Trend is regime-agnostic — it profits from whichever
 #                         way the long end resolves, which is exactly the
 #                         exposure you want when you cannot call the direction.
 #   Defensives +2         Small tilt to cash-flow and healthcare; pricing
 #                         power is robust to both resolutions.
 #
-# Sum: -12 funded / +12 deployed. MUST be sum-zero or regime_classifier's
+# Sum: -15 funded / +15 deployed. MUST be sum-zero or regime_classifier's
 # import-time assertion will fail — which is the intended behaviour.
 TRANSITION_OVERLAY = {
     "VGT": -3, "QQQ": -1, "SMH": -1,
     "GLD": -2, "SLV": -1, "RING": -1,
     "TLT": -3,
-    "USFR": +4, "SGOV": +3,
+    "USFR": -1, "SGOV": -2,          # C3: was +4 / +3
+    "DBMF": +5, "SCHP": +5,          # C3: trend + TIPS in place of idle cash
     "KMLM": +3,
     "SCHD": +1, "XLV": +1,
 }

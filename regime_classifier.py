@@ -148,6 +148,13 @@ BASE_WEIGHTS = {
     "TLT": 10, "KMLM": 4,                    # duration (contingent) + trend
 }
 
+# Sleeves a regime overlay may ADD without a base weight. C3 (adopted
+# 2026-11-14): the transition book moves 10 points of idle cash into DBMF
+# (a second trend fund) and SCHP (TIPS). Listed here by name so the selftest
+# still rejects any other ticker in an overlay as a typo. Both are adds, so
+# both go through entry_gate() like every other add.
+OVERLAY_ONLY_SLEEVES = ("DBMF", "SCHP")
+
 REGIMES = {
     "inflationary_repression": {
         "label": "Inflationary Repression",
@@ -1845,9 +1852,19 @@ def selftest() -> dict:
             s = sum((r.get(ok_) or {}).values())
             if s != 0:
                 fails.append(f"{k} {ok_} sums to {s}, must be 0")
-            unknown = set(r.get(ok_) or {}) - set(BASE_WEIGHTS)
+            unknown = set(r.get(ok_) or {}) - set(BASE_WEIGHTS) - set(OVERLAY_ONLY_SLEEVES)
             if unknown:
                 fails.append(f"{k} {ok_} uses tickers not in BASE_WEIGHTS: {unknown}")
+
+    # C3 (2026-11-14): the transition book holds DBMF 5 / SCHP 5 funded from
+    # cash (SGOV 3, USFR 2), and no other regime holds either.
+    _c3 = target_weights("transition_ambiguous", gate=False)
+    if (_c3.get("DBMF"), _c3.get("SCHP"), _c3.get("SGOV"), _c3.get("USFR")) != (5.0, 5.0, 3.0, 2.0) \
+            or abs(sum(_c3.values()) - 100) > 0.05:
+        fails.append(f"C3: transition book must be DBMF 5 / SCHP 5 / SGOV 3 / USFR 2, sum 100: {_c3}")
+    for _k in REGIMES:
+        if _k != "transition_ambiguous" and (set(OVERLAY_ONLY_SLEEVES) & set(target_weights(_k, gate=False))):
+            fails.append(f"C3 sleeves belong to transition_ambiguous only, found in {_k}")
 
     # Deterministic price fixtures for the entry gate (no network in tests).
     import numpy as _np
